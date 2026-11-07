@@ -16,7 +16,7 @@ namespace Alife.QQOfficial;
 
 [Module("QQ官方机器人接入",
     "接 QQ 开放平台的官方机器人 OpenAPI：自己取 access_token 并续期、连 WebSocket 网关收事件、把 QQ 侧消息按会话形状注入 Alife（回信仍由模型调用本插件的发送工具发出），并提供文本/markdown/富媒体发送、撤回、群管理与按钮回调等工具",
-    defaultCategory: "苏染的工具/官方机器人")]
+    defaultCategory: "苏染的工具/QQ与群管理")]
 public partial class QQOfficialModule(
     XmlFunctionCaller functionCaller,
     ILogger<QQOfficialModule> logger,
