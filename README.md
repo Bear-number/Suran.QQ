@@ -1,4 +1,4 @@
-# Alife.QQOfficial
+# Suran.QQ
 
 接 QQ 开放平台的官方机器人：自己取 access_token 并续期、连 WebSocket 网关收事件、把 QQ 侧消息按会话形状注入 Alife，回信由模型调用本插件的工具发出。
 
