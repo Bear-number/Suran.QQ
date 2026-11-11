@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.Text.Json;
 
-namespace Alife.QQOfficial;
+namespace Suran.QQ;
 
 /// <summary>
 /// 官方机器人接口的失败。文档原话：「请不要依据 message 来判定一个请求是否失败，message 可能会随时调整」，

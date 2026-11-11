@@ -2,7 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 
-namespace Alife.QQOfficial;
+namespace Suran.QQ;
 
 /// <summary>网关 IDENTIFY 用的 intents 位与可读名称。位值取自官方文档事件订阅页，
 /// 群里/私聊消息是 1&lt;&lt;25，群成员变化 1&lt;&lt;24（白名单能力），互动 1&lt;&lt;26，消息审核 1&lt;&lt;27。</summary>
@@ -14,7 +14,7 @@ static class QQIntents
     public const long interaction = 1L << 26;
     public const long messageAudit = 1L << 27;
 
-    public static long FromConfig(QQOfficialConfig config)
+    public static long FromConfig(QQConfig config)
     {
         long intents = 0;
         if (config.IntentGroupAndPrivate)

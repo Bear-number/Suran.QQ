@@ -2,7 +2,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.Text.Json;
 
-namespace Alife.QQOfficial;
+namespace Suran.QQ;
 
 /// <summary>官方接口的 JSON 取值：同一字段在不同事件里经常一会儿是数字一会儿是字符串（如 timestamp、code、expires_in），
 /// 全部在这里统一收口，别处不再各写一套 switch。</summary>

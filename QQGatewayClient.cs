@@ -10,7 +10,7 @@ using System.Text.Json.Nodes;
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace Alife.QQOfficial;
+namespace Suran.QQ;
 
 /// <summary>
 /// QQ 官方机器人的 WebSocket 网关客户端。协议形状照官方文档《事件订阅/网关》：
@@ -21,7 +21,7 @@ namespace Alife.QQOfficial;
 /// 平台不会给可读原因，只会把连接关掉），所以同一码连撞三次就停下并报出该关哪一位，不做无脑重连风暴。
 /// </summary>
 public class QQGatewayClient(
-    QQOfficialConfig config,
+    QQConfig config,
     QQAccessToken accessToken,
     Func<string, JsonElement, Task> handleEvent,
     Action<string>? logDetail)
@@ -342,8 +342,8 @@ public class QQGatewayClient(
                 ["properties"] = new JsonObject
                 {
                     ["$os"] = "windows",
-                    ["$browser"] = "Alife.QQOfficial",
-                    ["$device"] = "Alife.QQOfficial"
+                    ["$browser"] = "Suran.QQ",
+                    ["$device"] = "Suran.QQ"
                 }
             }
         };

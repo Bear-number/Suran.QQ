@@ -7,7 +7,7 @@ using System.Linq;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 
-namespace Alife.QQOfficial;
+namespace Suran.QQ;
 
 /// <summary>
 /// 身份通讯录：openid → 昵称/QQ号/备注名，以及群 openid → 群名。
@@ -126,6 +126,19 @@ public class QQIdentityStore(string folder, Action<string>? logDetail)
     }
 
     public string GroupName(string groupOpenid) => groupNames.TryGetValue(groupOpenid, out string? name) ? name : "";
+
+    /// <summary>已知群（openid → 群名）的副本，给设置页列群用。复制一份是为了避免和消息线程抢字典。</summary>
+    public Dictionary<string, string> GroupNamesSnapshot()
+    {
+        try
+        {
+            return new Dictionary<string, string>(groupNames);
+        }
+        catch
+        {
+            return new Dictionary<string, string>();
+        }
+    }
 
     /// <summary>人工或接口给的 QQ 号/备注名绑定。传空串表示不动那一项</summary>
     public void Bind(string openid, string qqNumber = "", string remark = "")

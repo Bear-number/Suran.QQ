@@ -9,7 +9,7 @@ using System.Text.Json.Nodes;
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace Alife.QQOfficial;
+namespace Suran.QQ;
 
 /// <summary>
 /// QQ 官方机器人 OpenAPI（统一 https://api.bot.qq.com，v2 路径）。三条硬规矩按文档来：
@@ -18,7 +18,7 @@ namespace Alife.QQOfficial;
 /// ③ 发送类接口有去重与配额（同 msg_id+msg_seq 重发报 40054005、主动消息超配额报 40034100），
 ///    所以**只对 GET 重试一次**，POST/DELETE 一律失败就如实抛，不在这里偷偷重发。
 /// </summary>
-public class QQRestClient(QQOfficialConfig config, QQAccessToken accessToken, Action<string>? logDetail)
+public class QQRestClient(QQConfig config, QQAccessToken accessToken, Action<string>? logDetail)
 {
     const string BrowserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36";
     const int authCodeAppIdFailed = 630002;
@@ -26,7 +26,7 @@ public class QQRestClient(QQOfficialConfig config, QQAccessToken accessToken, Ac
     static readonly Dictionary<string, HttpClient> clients = new();
 
     /// <summary>按「代理+超时」共用一个 HttpClient（每请求新建会累积端口）。**返回的是共享实例，调用方不要 using 释放**</summary>
-    public static HttpClient NewClient(QQOfficialConfig config)
+    public static HttpClient NewClient(QQConfig config)
     {
         string proxy = config.ProxyUrl.Trim();
         int timeout = Math.Clamp(config.RequestTimeoutSeconds, 5, 120);
@@ -63,6 +63,10 @@ public class QQRestClient(QQOfficialConfig config, QQAccessToken accessToken, Ac
 
     public Task<JsonElement> PutAsync(string path, JsonObject? body, CancellationToken cancelToken) =>
         SendAsync(HttpMethod.Put, path, body, allowAuthRetry: true, allowTransportRetry: false, cancelToken);
+
+    /// <summary>文档里「修改子频道」「修改入群审批策略」用的都是 PATCH，别拿 PUT 凑。</summary>
+    public Task<JsonElement> PatchAsync(string path, JsonObject? body, CancellationToken cancelToken) =>
+        SendAsync(HttpMethod.Patch, path, body, allowAuthRetry: true, allowTransportRetry: false, cancelToken);
 
     public Task<JsonElement> DeleteAsync(string path, CancellationToken cancelToken) =>
         SendAsync(HttpMethod.Delete, path, null, allowAuthRetry: true, allowTransportRetry: false, cancelToken);

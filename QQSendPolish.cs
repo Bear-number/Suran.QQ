@@ -4,7 +4,7 @@ using System.Globalization;
 using System.IO;
 using System.Linq;
 
-namespace Alife.QQOfficial;
+namespace Suran.QQ;
 
 /// <summary>
 /// 发送侧的几个"平台不报错但效果不对"的坑，集中放在这里，都是纯函数好单测：

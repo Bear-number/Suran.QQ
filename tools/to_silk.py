@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-r"""pcm → silk 封装器：给 Alife.QQOfficial 的「语音·silk 编码器」用。
+r"""pcm → silk 封装器：给 Suran.QQ 的「语音·silk 编码器」用。
 （ffmpeg 那一步由插件先跑好，这里只负责 pcm → silk。）
 
 为什么需要它：官方 file_type=3 的语音条要 silk，而 **ffmpeg 只能解码 silk、不能编码**，
@@ -8,7 +8,7 @@ r"""pcm → silk 封装器：给 Alife.QQOfficial 的「语音·silk 编码器�
 
 插件配置（用 Alife 自带的解释器）：
     语音·silk 编码器 = D:\Alife\Runtime\Python312\python.exe
-    语音·编码器参数   = "D:\Alife\Storage\Plugins\Alife.QQOfficial\tools\to_silk.py" {in} {out}
+    语音·编码器参数   = "D:\Alife\Storage\Plugins\Suran.QQ\tools\to_silk.py" {in} {out}
 
 装 pilk：
     D:\Alife\Runtime\Python312\python.exe -m pip install pilk
