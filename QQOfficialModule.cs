@@ -61,7 +61,10 @@ public partial class QQOfficialModule(
                 + "被动回复有平台窗口（群 5 分钟最多 5 次、单聊 60 分钟最多 4 次），过期或超次数会如实报错，那时只能走主动消息且需要配置里放开。"
                 + "连不上、收不到事件先跑 QQOfficialEnv。"
         };
-        functionCaller.RegisterHandler(handler, cancellationToken: DestroyCancellationToken); // 不挂隐式：默认 Explicit，文档直接进「当前可用功能」，不再留 <name/> 入口等模型自己去翻
+        // 默认 Explicit：文档直接进「当前可用功能」，不再留 <name/> 入口等模型自己去翻；配置里可关掉改走隐式。
+        functionCaller.RegisterHandler(handler,
+            (Configuration?.DocumentAlwaysResident ?? true) ? DocumentMode.Explicit : DocumentMode.Implicit,
+            cancellationToken: DestroyCancellationToken);
         return Task.CompletedTask;
     }
 
