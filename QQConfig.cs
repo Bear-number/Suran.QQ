@@ -162,88 +162,91 @@ public class QQConfig
     [Description("记录请求与事件的时间与错误码。**不会**记录 AppSecret 与 access_token")]
     public bool DetailLog { get; set; } = false;
 
-    // ============================================================
-    // 协议端（OneBot v11）：与官方 OpenAPI 并行的第二条通道
-    // ============================================================
+    [DisplayName("按钮·回调按钮改指令")]
+    [Description("开：把 action.type=1（回调）自动换成 type=2 + enter，平台推不了互动事件时按钮也能点一下就发")]
+    public bool KeyboardCallbackToCommand { get; set; }
 
-    [DisplayName("协议端·启用")]
-    [Description("开：启动 OneBot v11 通道（连反连地址、收群/私聊消息、注册 QChat 等工具并注入提示词）；关：整条协议端通道完全不启动，官方机器人通道照常")]
-    public bool OneBotEnabled { get; set; } = false;
+    [DisplayName("按钮·限次策略")]
+    [Description("开：按按钮策略拦截超额/过期/重复点击。策略取按钮 JSON 里的 once / ttl / limit，缺省用下面两个默认值")]
+    public bool ButtonLimitEnabled { get; set; }
 
-    [DisplayName("协议端·机器人 QQ 号")]
-    [Description("协议端登录的机器人 QQ 号。用于识别有人 @ 自己、拦截发给自己；填 0 会让唤醒判断与自检退化")]
-    public long BotId { get; set; }
+    [DisplayName("按钮·追踪前缀")]
+    [Description("开：给指令按钮的 data 加 #qb# 前缀，点回来后自动剥掉。防止用户正常发一句和按钮 data 一样的文字被当成点击，默认开")]
+    public bool ButtonPolicyToken { get; set; } = true;
 
-    [DisplayName("协议端·主人 QQ 号")]
-    [Description("主人的 QQ 号：私聊消息会直接注入会话，且被视为最高优先级；填 0 会影响功能使用与 AI 的理解能力")]
-    public long OwnerId { get; set; }
+    [DisplayName("按钮·默认每人一次")]
+    [Description("按钮没写 once / limit 时，默认每人只能点一次")]
+    public bool ButtonDefaultOnce { get; set; }
 
-    [DisplayName("协议端·反连地址")]
-    [Description("OneBot v11 的 WebSocket 反连地址，例如 ws://127.0.0.1:3001")]
-    public string Url { get; set; } = "ws://127.0.0.1:3001";
+    [DisplayName("按钮·默认有效期(秒)")]
+    [Description("按钮没写 ttl 时的有效期，0 = 不限")]
+    public int ButtonDefaultTtlSeconds { get; set; }
 
-    [DisplayName("协议端·访问令牌")]
-    [Description("OneBot WebSocket 的 Authorization Bearer Token；协议端没设 token 就留空")]
-    public string Token { get; set; } = "";
+    [DisplayName("按钮·账本上限")]
+    [Description("内存里最多记多少个按钮，超出先清最旧的，默认 500")]
+    public int ButtonMaxEntries { get; set; } = 500;
 
-    [DisplayName("协议端·自动重连间隔(秒)")]
-    [Description("断线后每隔多少秒尝试重连；填 0 关闭自动重连，默认 60 秒")]
-    public int AutoReconnectSeconds { get; set; } = 60;
+    [DisplayName("按钮·拦截时提示模型")]
+    [Description("开：点击被策略拦下时在会话里提示模型（不打扰用户），默认开")]
+    public bool ButtonNotifyOnLimit { get; set; } = true;
 
-    [DisplayName("协议端·总提示词")]
-    [Description("注入给 AI 的协议端聊天规则，会随功能说明常驻提示词一起进入上下文")]
-    public string AppendDocumentPrompt { get; set; } =
-        "注意！如果回复QQ消息，必须保持极简的文本（0-20字）来保证自然感。同时群聊消息要选择性忽略，避免刷屏。此外注意分清语境，群聊环境人声嘈杂，不要回复与自己无关的内容，回复时请使用CQ码功能指定回复人。";
+    [DisplayName("按钮·拦截时提示用户")]
+    [Description("开：点击被拦下时直接给对方回一句提示（占用一次被动回复额度），默认关")]
+    public bool ButtonNotifyUserOnLimit { get; set; }
 
-    [DisplayName("协议端·私聊附加提示词")]
-    [Description("收到私聊消息时追加在消息末尾的提示词，用于约束回复长度与语气")]
-    public string AppendPrivateChatPrompt { get; set; } = "(回复请保持1-20字)";
+    [DisplayName("按钮·用户提示文案")]
+    [Description("上面那项打开后发给用户的固定文案")]
+    public string ButtonLimitNotifyText { get; set; } = "这个按钮已经用过啦";
 
-    [DisplayName("协议端·群聊附加提示词")]
-    [Description("收到群聊消息时追加在消息末尾的提示词，用于约束回复长度与场合")]
-    public string AppendGroupChatPrompt { get; set; } = "(回复请保持1-20字。注意分清群聊场合，不要随便插话，避免刷屏)";
+    [DisplayName("收信·读取文件内容上限(字)")]
+    [Description("收到的文本类附件（txt/log/json/md/csv 等）读进上下文的最大字数，默认 4000；0 = 不读")]
+    public int InboundFileMaxChars { get; set; } = 4000;
 
-    [DisplayName("协议端·忽略群")]
-    [Description("完全屏蔽消息的群号，不会收到这些群的任何信息；多个用英文逗号分隔")]
-    public string IgnoredGroup { get; set; } = "";
+    [DisplayName("输入状态·延时(秒)")]
+    [Description("收到私聊后隔多久才显示「正在输入」，默认 2 秒；0 = 立刻")]
+    public int TypingDelaySeconds { get; set; } = 2;
 
-    [DisplayName("协议端·唤醒词")]
-    [Description("原始群消息中出现即开启该群监听的词，多个用英文逗号分隔；@ 机器人也算唤醒")]
-    public string WakingWords { get; set; } = "";
+    [DisplayName("输入状态·防抖(秒)")]
+    [Description("同一个人刚显示过状态后，这么多秒内不再重复显示，默认 3 秒；0 = 不防抖")]
+    public int TypingDebounceSeconds { get; set; } = 3;
 
-    [DisplayName("协议端·概率激活(0~100)")]
-    [Description("收到未激活群的消息时自动开启监听的概率，按百分比填写：0=从不，100=每条都开")]
-    public float ProactiveChatProbability { get; set; }
+    [DisplayName("输入状态·主动也显示")]
+    [Description("开：没有被动 msg_id 时也发一帧主动状态（占主动额度），默认开")]
+    public bool TypingAllowProactive { get; set; } = true;
 
-    [DisplayName("协议端·预缓存条数")]
-    [Description("群聊未激活时也始终缓存的最近消息条数，激活后会一并发送，让 AI 感知聊天背景")]
-    public int PerBufferSize { get; set; } = 5;
+    [DisplayName("素材·配额提醒阈值")]
+    [Description("markdown 素材图达到这个数量就在上传后提醒，平台上限 100，默认 90；0 = 不提醒")]
+    public int MarkdownImageWarnAt { get; set; } = 90;
 
-    [DisplayName("协议端·最大缓存条数")]
-    [Description("群聊激活状态下最多暂存多少条消息，超出会立即推送；-1 表示不限制")]
-    public int MaxBufferMessages { get; set; } = -1;
+    [DisplayName("发送·@ 标记形态")]
+    [Description("legacy = <@openid>（平台自己下发用的那种，默认）；new = <qqbot-at-user id=\"…\" />（官方文档推荐，但部分环境会当纯文本）")]
+    public string AtMarkupStyle { get; set; } = "legacy";
 
-    [DisplayName("协议端·推送间隔(秒)")]
-    [Description("群消息暂存多久后自动推送，默认 12 秒")]
-    public float FlushInterval { get; set; } = 12f;
+    [DisplayName("发送·含 @ 强制 markdown")]
+    [Description("开：正文里出现 @ 标记就自动按 markdown 发（纯文本里 @ 只会显示成字符），默认开")]
+    public bool AtForceMarkdown { get; set; } = true;
 
-    [DisplayName("协议端·消息防抖")]
-    [Description("开：每收到一条新消息就重置推送倒计时，等对方说完再一起推送")]
-    public bool DebounceEnabled { get; set; }
+    [DisplayName("发送·引用与 markdown 冲突")]
+    [Description("markdown = 优先 markdown，自动丢掉引用（默认）；reference = 优先引用，非必须场景退回纯文本")]
+    public string MediaConflictPrefer { get; set; } = "markdown";
 
-    [DisplayName("协议端·唤醒立即推送")]
-    [Description("开：遇到满足唤醒条件的群消息时，立即推送当前缓存，不等倒计时")]
-    public bool PushOnWakeUp { get; set; }
+    [DisplayName("发送·动图处理")]
+    [Description("auto = 原图 → APNG → 静态 PNG → 文件（默认）；static = 跳过原图直接转档；file = 原图按文件发")]
+    public string AnimatedImageMode { get; set; } = "auto";
 
-    [DisplayName("协议端·回复后关闭监听")]
-    [Description("开：AI 回复群消息后立即关闭该群的消息监听")]
-    public bool CloseGroupAfterReply { get; set; }
+    [DisplayName("收信·双副本宽限(秒)")]
+    [Description("全量群消息与 @ 副本同时到达时，全量副本等这么多秒再处理，发现 @ 副本已到就丢弃，默认 0（不等待）")]
+    public int DoubleCopyGraceSeconds { get; set; }
 
-    [DisplayName("协议端·自动关闭(分钟)")]
-    [Description("群监听长时间没有新消息触发时自动关闭的分钟数，默认 4 分钟")]
-    public float AutoCloseMinutes { get; set; } = 4f;
+    [DisplayName("按钮·账本持久化")]
+    [Description("开：按钮限次账本落盘，重启后「每人一次/限次」仍然生效，默认开")]
+    public bool ButtonLedgerPersist { get; set; } = true;
 
-    [DisplayName("协议端·私聊防抖(秒)")]
-    [Description("私聊消息连续收到时等待多少秒再一起推送，0 表示立即推送")]
-    public float PrivateDebounceTime { get; set; }
+    [DisplayName("收信·注入引用内容")]
+    [Description("开：有人引用回复时，把被引用那条的作者与正文一起注入（截断 300 字），默认开")]
+    public bool InjectQuotedContent { get; set; } = true;
+
+    [DisplayName("工具·高风险群管理")]
+    [Description("开：允许禁言/全员禁言/踢人/黑名单/加群审批/频道踢人/改频道权限这些高风险工具；默认关，调用会直接报错")]
+    public bool EnableSensitiveTools { get; set; }
 }

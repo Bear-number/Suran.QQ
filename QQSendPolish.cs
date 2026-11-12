@@ -24,18 +24,23 @@ static class QQSendPolish
     /// <summary>正文里已经出现过 @ 标记（平台自己的形态或新式标签）就必须按 markdown 发</summary>
     public static bool HasAtMarker(string text) => atMarker.IsMatch(text ?? "");
 
-    /// <summary>把 openid 列表拼成 legacy @ 标记追加到正文尾部；列表内重复与正文里已有的都不重复拼</summary>
-    public static string AppendAtMarkers(string text, List<string> openids)
+    /// <summary>把 openid 列表拼成 @ 标记追加到正文尾部；style=new 用新式标签，其余走 legacy；重复与正文里已有的都不再拼</summary>
+    public static string AppendAtMarkers(string text, List<string> openids, string style = "legacy")
     {
         string body = text ?? "";
+        bool useNew = string.Equals(style, "new", StringComparison.OrdinalIgnoreCase);
         List<string> missing = openids.Distinct()
-            .Where(openid => body.Contains("<@" + openid, StringComparison.Ordinal) == false)
+            .Where(openid => body.Contains("<@" + openid, StringComparison.Ordinal) == false
+                             && body.Contains("<qqbot-at-user id=\"" + openid, StringComparison.Ordinal) == false)
             .ToList();
         if (missing.Count == 0)
         {
             return body;
         }
-        return body + " " + string.Join(" ", missing.Select(openid => "<@" + openid + ">"));
+        string markers = string.Join(" ", missing.Select(openid => useNew
+            ? "<qqbot-at-user id=\"" + openid + "\" />"
+            : "<@" + openid + ">"));
+        return body + " " + markers;
     }
 
     /// <summary>@ 目标是昵称不是 openid 时报错——昵称谁都能改，拿它当身份会把人 @ 错</summary>

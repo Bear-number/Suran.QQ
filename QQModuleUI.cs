@@ -20,9 +20,8 @@ public partial class QQModuleUI : ModuleUIBase<QQModule, QQConfig>, IDisposable
 {
     System.Timers.Timer? listenTimer;
 
-    // 两个通道各自记住下拉框选中的群（group_openid / QQ 群号字符串）
+    // 官方通道记住下拉框选中的群（group_openid）
     string? selectedOfficialGroup;
-    string? selectedOneBotGroup;
 
     protected override void OnInitialized()
     {
@@ -57,6 +56,25 @@ public partial class QQModuleUI : ModuleUIBase<QQModule, QQConfig>, IDisposable
         ("at", "仅 @ 时注入（推荐）", true),
         ("all", "全部群消息都注入", true),
         ("listen", "群监听（唤醒词/概率激活，缓存后推送）", true),
+    };
+
+    static readonly List<(string Value, string Label, bool Enabled)> AtStyleOptions = new()
+    {
+        ("legacy", "legacy：<@openid>（默认）", true),
+        ("new", "new：<qqbot-at-user id=… />", true),
+    };
+
+    static readonly List<(string Value, string Label, bool Enabled)> ConflictOptions = new()
+    {
+        ("markdown", "优先 markdown，自动丢引用（默认）", true),
+        ("reference", "优先引用，非必须场景退回纯文本", true),
+    };
+
+    static readonly List<(string Value, string Label, bool Enabled)> AnimatedOptions = new()
+    {
+        ("auto", "auto：原图 → APNG → 静态 PNG → 文件", true),
+        ("static", "static：跳过原图直接转档", true),
+        ("file", "file：原图按文件发", true),
     };
 
     protected override void BuildRenderTree(RenderTreeBuilder b)
@@ -144,6 +162,22 @@ public partial class QQModuleUI : ModuleUIBase<QQModule, QQConfig>, IDisposable
                 v => Configuration.PrivateChatPrompt = v, "注入私聊消息时末尾追加的约束句，留空不追加");
             AddHint(b, ref i, "私聊消息末尾追加的约束句，同样留空就不加。");
 
+            AddNumberInput(b, ref i, "读文件内容上限（字）", Configuration.InboundFileMaxChars,
+                v => Configuration.InboundFileMaxChars = v, 0, 20000);
+            AddHint(b, ref i, "收到的文本类附件（txt/log/json/md/csv 等）读进上下文的最大字数，默认 4000；0 = 只给链接不读内容。");
+
+            AddLabeledSelect(b, ref i, Configuration.AtMarkupStyle,
+                v => Configuration.AtMarkupStyle = v, AtStyleOptions);
+            AddHint(b, ref i, "发送 @ 时用的标记形态。部分环境会把 new 形态当纯文本，默认 legacy 更稳。");
+
+            AddSwitch(b, ref i, "含 @ 强制 markdown", Configuration.AtForceMarkdown,
+                v => Configuration.AtForceMarkdown = v);
+            AddHint(b, ref i, "开：正文里出现 @ 标记就自动按 markdown 发；关：可能显示成原始标记。");
+
+            AddLabeledSelect(b, ref i, Configuration.MediaConflictPrefer,
+                v => Configuration.MediaConflictPrefer = v, ConflictOptions);
+            AddHint(b, ref i, "markdown 与引用只能留一个：默认留 markdown 丢引用；选 reference 时，非必须场景退回纯文本发引用。");
+
             AddSwitch(b, ref i, "允许发送消息", Configuration.EnableSend,
                 v => Configuration.EnableSend = v);
             AddHint(b, ref i, "关掉后所有发送类工具不可用，收信与注入不受影响。");
@@ -157,6 +191,48 @@ public partial class QQModuleUI : ModuleUIBase<QQModule, QQConfig>, IDisposable
                 v => Configuration.DocumentAlwaysResident = v);
             AddHint(b, ref i, "开：工具说明常驻系统提示词；关：隐式加载省 token，但模型得先读入口文档。"
                 + "QQ 收发是高频基础能力，默认开。改完要重载插件。");
+        });
+
+        SectionPanel(b, ref i, "按钮", () =>
+        {
+            AddSwitch(b, ref i, "回调按钮改指令", Configuration.KeyboardCallbackToCommand,
+                v => Configuration.KeyboardCallbackToCommand = v);
+            AddHint(b, ref i, "开：把 action.type=1（回调）自动换成 type=2 + enter，平台推不了互动事件时按钮也能点一下就发。");
+
+            AddSwitch(b, ref i, "按钮限次策略", Configuration.ButtonLimitEnabled,
+                v => Configuration.ButtonLimitEnabled = v);
+            AddHint(b, ref i, "开：按按钮 JSON 里的 once / ttl / limit 拦截超额、过期、重复点击；没写的用下面两个默认值。");
+
+            AddSwitch(b, ref i, "追踪前缀", Configuration.ButtonPolicyToken,
+                v => Configuration.ButtonPolicyToken = v);
+            AddHint(b, ref i, "开：给指令按钮的 data 自动加 #qb# 前缀，点回来后剥掉。防止用户正常发一句和 data 一样的文字被误判成点击。");
+
+            AddSwitch(b, ref i, "默认每人一次", Configuration.ButtonDefaultOnce,
+                v => Configuration.ButtonDefaultOnce = v);
+            AddHint(b, ref i, "按钮没写 once / limit 时，默认每人只能点一次。");
+
+            AddNumberInput(b, ref i, "默认有效期（秒）", Configuration.ButtonDefaultTtlSeconds,
+                v => Configuration.ButtonDefaultTtlSeconds = v, 0, 86400);
+            AddHint(b, ref i, "按钮没写 ttl 时的有效期，0 = 不限。");
+
+            AddNumberInput(b, ref i, "账本上限", Configuration.ButtonMaxEntries,
+                v => Configuration.ButtonMaxEntries = v, 50, 5000);
+            AddHint(b, ref i, "内存里最多记多少个按钮，超出先清过期的再清最旧的。重启后账本清空。");
+
+            AddSwitch(b, ref i, "拦截时提示模型", Configuration.ButtonNotifyOnLimit,
+                v => Configuration.ButtonNotifyOnLimit = v);
+            AddHint(b, ref i, "开：点击被拦下时在会话里提示模型（不打扰用户）。");
+
+            AddSwitch(b, ref i, "拦截时提示用户", Configuration.ButtonNotifyUserOnLimit,
+                v => Configuration.ButtonNotifyUserOnLimit = v);
+            AddHint(b, ref i, "开：点击被拦下时直接给对方回一句固定文案（占一次被动回复额度）。");
+
+            AddInput(b, ref i, "用户提示文案", Configuration.ButtonLimitNotifyText,
+                v => Configuration.ButtonLimitNotifyText = v, "这个按钮已经用过啦");
+
+            AddSwitch(b, ref i, "账本持久化", Configuration.ButtonLedgerPersist,
+                v => Configuration.ButtonLedgerPersist = v);
+            AddHint(b, ref i, "开：限次账本落盘，重启后「每人一次/限次」仍然成立，默认开。");
         });
 
         SectionPanel(b, ref i, "群监听（官方通道）", () =>
@@ -273,107 +349,39 @@ public partial class QQModuleUI : ModuleUIBase<QQModule, QQConfig>, IDisposable
             AddSwitch(b, ref i, "详细日志", Configuration.DetailLog,
                 v => Configuration.DetailLog = v);
             AddHint(b, ref i, "记录请求与事件的时间、错误码。不会记录 AppSecret 与 access_token。");
-        });
 
-        SectionPanel(b, ref i, "协议端（OneBot）", () =>
-        {
-            AddSwitch(b, ref i, "启用协议端", Configuration.OneBotEnabled,
-                v => Configuration.OneBotEnabled = v);
-            AddHint(b, ref i, "开：额外启动 OneBot v11 通道，连反连地址收群/私聊消息，并注册 QChat/QFile/QImage 等工具。"
-                + "关：这条通道完全不启动，不建连接、不注入提示词，上面的官方机器人照常工作。默认关。");
+            AddSwitch(b, ref i, "注入引用内容", Configuration.InjectQuotedContent,
+                v => Configuration.InjectQuotedContent = v);
+            AddHint(b, ref i, "开：有人引用回复时，把被引用那条的作者与正文（截断 300 字）一起注入。");
 
-            AddSubGroup(b, ref i, "连接");
-            AddOneBotConnectionRow(b, ref i);
+            AddSwitch(b, ref i, "高风险群管理工具", Configuration.EnableSensitiveTools,
+                v => Configuration.EnableSensitiveTools = v);
+            AddHint(b, ref i, "开：允许禁言/全员禁言/踢人/黑名单/加群审批/频道踢人/改频道权限；默认关，调用会直接报错。");
 
-            AddInput(b, ref i, "机器人 QQ 号", Configuration.BotId.ToString(), v =>
-            {
-                Configuration.BotId = long.TryParse(v.Trim(), out long id) ? id : 0;
-            }, "协议端登录的机器人 QQ 号");
-            AddHint(b, ref i, "用来识别有人 @ 自己、拦截发给自己。填 0 会让唤醒判断退化。");
+            AddSubGroup(b, ref i, "输入状态");
+            AddNumberInput(b, ref i, "延时（秒）", Configuration.TypingDelaySeconds,
+                v => Configuration.TypingDelaySeconds = v, 0, 30);
+            AddHint(b, ref i, "收到私聊后隔多久才显示「正在输入」，默认 2 秒；0 = 立刻。");
 
-            AddInput(b, ref i, "主人 QQ 号", Configuration.OwnerId.ToString(), v =>
-            {
-                Configuration.OwnerId = long.TryParse(v.Trim(), out long id) ? id : 0;
-            }, "主人的 QQ 号");
-            AddHint(b, ref i, "主人的私聊消息会直接进会话，并被视为最高优先级。填 0 会影响功能使用与 AI 的理解能力。");
+            AddNumberInput(b, ref i, "防抖（秒）", Configuration.TypingDebounceSeconds,
+                v => Configuration.TypingDebounceSeconds = v, 0, 120);
+            AddHint(b, ref i, "同一个人刚显示过状态后，这么久内不再重复显示，默认 3 秒；0 = 不防抖。");
 
-            AddInput(b, ref i, "反连地址", Configuration.Url, v => Configuration.Url = v,
-                "如 ws://127.0.0.1:3001");
-            AddHint(b, ref i, "OneBot v11 的 WebSocket 地址。协议端要开正向/反向 WebSocket 并把地址对上。");
+            AddSwitch(b, ref i, "主动也显示", Configuration.TypingAllowProactive,
+                v => Configuration.TypingAllowProactive = v);
+            AddHint(b, ref i, "开：没有被动 msg_id 时也发一帧主动状态（占主动额度）。");
 
-            AddInput(b, ref i, "访问令牌", Configuration.Token, v => Configuration.Token = v,
-                "协议端没设 token 就留空", password: true);
-            AddHint(b, ref i, "会作为 Authorization: Bearer 发出去，只存在本地配置里。");
+            AddNumberInput(b, ref i, "素材配额提醒阈值", Configuration.MarkdownImageWarnAt,
+                v => Configuration.MarkdownImageWarnAt = v, 0, 100);
+            AddHint(b, ref i, "markdown 素材达到这个数量就在上传后提醒，平台上限 100，默认 90；0 = 不提醒。");
 
-            AddNumberInput(b, ref i, "自动重连间隔（秒）", Configuration.AutoReconnectSeconds,
-                v => Configuration.AutoReconnectSeconds = v, 0, 600);
-            AddHint(b, ref i, "断线后每隔多少秒重连；0 = 关闭自动重连，默认 60 秒。");
+            AddLabeledSelect(b, ref i, Configuration.AnimatedImageMode,
+                v => Configuration.AnimatedImageMode = v, AnimatedOptions);
+            AddHint(b, ref i, "GIF/WebP 的发送档位：auto 逐级降级；static 跳过原图；file 原图按文件发（保动画）。");
 
-            AddSubGroup(b, ref i, "提示词");
-            AddInput(b, ref i, "总提示词", Configuration.AppendDocumentPrompt, v => Configuration.AppendDocumentPrompt = v,
-                "注入给 AI 的协议端聊天规则");
-            AddHint(b, ref i, "随功能说明一起注入，用来约束回复长度、群聊场合和 CQ 码用法。");
-
-            AddInput(b, ref i, "私聊附加提示词", Configuration.AppendPrivateChatPrompt,
-                v => Configuration.AppendPrivateChatPrompt = v, "收到私聊消息时追加在消息末尾");
-            AddHint(b, ref i, "只在该条私聊消息的末尾追加，用来约束长度与语气。");
-
-            AddInput(b, ref i, "群聊附加提示词", Configuration.AppendGroupChatPrompt,
-                v => Configuration.AppendGroupChatPrompt = v, "收到群聊消息时追加在消息末尾");
-            AddHint(b, ref i, "只在该批群聊消息的末尾追加，提醒模型分清场合、别刷屏。");
-
-            AddSubGroup(b, ref i, "群监听");
-            AddOneBotListenStatus(b, ref i);
-
-            AddInput(b, ref i, "忽略群", Configuration.IgnoredGroup, v => Configuration.IgnoredGroup = v,
-                "完全屏蔽的群号，英文逗号分隔");
-            AddHint(b, ref i, "这些群的消息一条都不收，也不会进上下文。");
-
-            AddInput(b, ref i, "唤醒词", Configuration.WakingWords, v => Configuration.WakingWords = v,
-                "英文逗号分隔；@ 机器人也算唤醒");
-            AddHint(b, ref i, "群消息原文里出现这些词就开启该群监听，并立即推送（如果开了「唤醒立即推送」）。");
-
-            AddNumberInputF(b, ref i, "概率激活（%）", Configuration.ProactiveChatProbability * 100f,
-                v => Configuration.ProactiveChatProbability = v / 100f, 0, 100, 5);
-            AddHint(b, ref i, "未激活的群收到消息时，按这个百分比概率自动开启监听：0 = 从不，100 = 每条都开。");
-
-            AddSubGroup(b, ref i, "缓存与防抖");
-            AddNumberInput(b, ref i, "预缓存条数", Configuration.PerBufferSize,
-                v => Configuration.PerBufferSize = v, 0, 100);
-            AddHint(b, ref i, "群聊未激活时也始终缓存的最近消息条数，激活后一并发送，让 AI 知道聊天背景。");
-
-            AddNumberInput(b, ref i, "最大缓存条数", Configuration.MaxBufferMessages,
-                v => Configuration.MaxBufferMessages = v, -1, 1000);
-            AddHint(b, ref i, "群聊激活状态下最多暂存多少条，超出立即推送；-1 = 不限制。");
-
-            AddNumberInputF(b, ref i, "推送间隔（秒）", Configuration.FlushInterval,
-                v => Configuration.FlushInterval = v, 1, 300, 1);
-            AddHint(b, ref i, "群消息暂存多久后自动推送，默认 12 秒。");
-
-            AddSwitch(b, ref i, "消息防抖", Configuration.DebounceEnabled,
-                v => Configuration.DebounceEnabled = v);
-            AddHint(b, ref i, "开：每来一条新消息就重置推送倒计时，等对方说完再一起推。");
-
-            AddSwitch(b, ref i, "唤醒立即推送", Configuration.PushOnWakeUp,
-                v => Configuration.PushOnWakeUp = v);
-            AddHint(b, ref i, "开：遇到满足唤醒条件的群消息时，立即推送当前缓存，不等倒计时。");
-
-            AddSubGroup(b, ref i, "自动关闭");
-            AddSwitch(b, ref i, "回复后关闭监听", Configuration.CloseGroupAfterReply,
-                v => Configuration.CloseGroupAfterReply = v);
-            AddHint(b, ref i, "开：AI 回复群消息后立即关闭该群监听，避免持续插话。");
-
-            AddNumberInputF(b, ref i, "自动关闭（分钟）", Configuration.AutoCloseMinutes,
-                v => Configuration.AutoCloseMinutes = v, 1, 240, 1);
-            AddHint(b, ref i, "群监听长时间没有新消息触发时自动关闭的分钟数，默认 4 分钟。");
-
-            AddNumberInputF(b, ref i, "私聊防抖（秒）", Configuration.PrivateDebounceTime,
-                v => Configuration.PrivateDebounceTime = v, 0, 60, 1);
-            AddHint(b, ref i, "私聊连续收到消息时等待多少秒再一起推送；0 = 立即推送。");
-
-            AddSubGroup(b, ref i, "快速预设");
-            AddHint(b, ref i, "两套常用组合，点一下把上面几项改成推荐值；改完仍需点下方保存。");
-            AddOneBotPresetRow(b, ref i);
+            AddNumberInput(b, ref i, "双副本宽限（秒）", Configuration.DoubleCopyGraceSeconds,
+                v => Configuration.DoubleCopyGraceSeconds = v, 0, 5);
+            AddHint(b, ref i, "全量群消息与 @ 副本同时到达时，全量副本等这么久再处理，发现 @ 副本已到就丢弃，默认 0。");
         });
 
         b.CloseElement();
@@ -389,7 +397,7 @@ public partial class QQModuleUI : ModuleUIBase<QQModule, QQConfig>, IDisposable
         b.AddAttribute(i++, "class", "gs-hero");
         b.OpenElement(i++, "div");
         b.AddAttribute(i++, "class", "gs-hero-title");
-        b.AddContent(i++, "官方 OpenAPI + OneBot 协议端");
+        b.AddContent(i++, "官方 OpenAPI");
         b.CloseElement();
         b.OpenElement(i++, "div");
         b.AddAttribute(i++, "class", "gs-hero-sub");
@@ -533,36 +541,6 @@ public partial class QQModuleUI : ModuleUIBase<QQModule, QQConfig>, IDisposable
             module.OfficialListenEnabled ? "" : "当前策略不是「群监听」，下面开关不生效",
             "还没有群发过消息。机器人收到某个群的任意消息后，这个群就会出现在这里。",
             module.OfficialListenEnabled, selectedOfficialGroup, v => selectedOfficialGroup = v);
-    }
-
-    /// <summary>协议端（OneBot）的群监听运行时状态，和官方通道同一套版式。</summary>
-    void AddOneBotListenStatus(RenderTreeBuilder b, ref int seq)
-    {
-        QQModule? module = ResolveModule();
-        if (module == null)
-        {
-            AddModuleOffline(b, ref seq);
-            return;
-        }
-
-        List<ListenRowView> rows = new();
-        foreach (QQModule.QQOneBotGroupSnapshot group in module.OneBotGroupSnapshots())
-        {
-            QQModule.QQOneBotGroupSnapshot snapshot = group;
-            rows.Add(new ListenRowView(snapshot.GroupId.ToString(), snapshot.Name, snapshot.Listening,
-                snapshot.Buffer, snapshot.PreBuffer, snapshot.NextFlushSeconds, snapshot.AutoCloseSeconds,
-                snapshot.LastActiveAt,
-                on => module.SetOneBotGroupListening(snapshot.GroupId, on),
-                () => module.FlushOneBotGroupNow(snapshot.GroupId)));
-        }
-
-        string warn = Configuration.OneBotEnabled == false
-            ? "协议端未启用，下面开关不会生效"
-            : module.IsOneBotConnected ? "" : "协议端还没连上，收到消息后才有群";
-
-        AddListenBlock(b, ref seq, module.OneBotListeningCount, rows, warn,
-            "还没有群消息。协议端收到某个群的消息后，这个群就会出现在这里。",
-            Configuration.OneBotEnabled, selectedOneBotGroup, v => selectedOneBotGroup = v);
     }
 
     void AddListenBlock(RenderTreeBuilder b, ref int seq, int listeningCount, List<ListenRowView> rows,
@@ -756,9 +734,6 @@ public partial class QQModuleUI : ModuleUIBase<QQModule, QQConfig>, IDisposable
         b.CloseElement();
     }
 
-    bool oneBotReconnecting;
-    string oneBotNotice = "";
-
     /// <summary>官方网关状态（网关按「断线重连间隔」自己重连，这里只显示，不打断它）。</summary>
     void AddOfficialConnectionRow(RenderTreeBuilder b, ref int seq)
     {
@@ -779,7 +754,7 @@ public partial class QQModuleUI : ModuleUIBase<QQModule, QQConfig>, IDisposable
         b.CloseElement();
     }
 
-    /// <summary>官方通道的快速预设，对应协议端那两套，只是换成本地字段。</summary>
+    /// <summary>官方通道的快速预设。</summary>
     void AddOfficialPresetRow(RenderTreeBuilder b, ref int seq)
     {
         b.OpenElement(seq++, "div");
@@ -815,42 +790,6 @@ public partial class QQModuleUI : ModuleUIBase<QQModule, QQConfig>, IDisposable
         StateHasChanged();
     }
 
-    /// <summary>协议端连接状态 + 重连按钮（对齐 QChat 的设置页）。</summary>
-    void AddOneBotConnectionRow(RenderTreeBuilder b, ref int seq)
-    {
-        QQModule? module = ResolveModule();
-        bool connected = module != null && module.IsOneBotConnected;
-
-        b.OpenElement(seq++, "div");
-        b.AddAttribute(seq++, "class", "gs-listen-bar");
-        b.OpenElement(seq++, "span");
-        b.AddAttribute(seq++, "class", connected ? "gs-listen-tag" : "gs-listen-tag off");
-        b.AddContent(seq++, connected ? "已连接" : "未连接");
-        b.CloseElement();
-        AddActionButton(b, ref seq, oneBotReconnecting ? "重连中…" : "重连", ReconnectOneBot,
-            Configuration.OneBotEnabled == false || oneBotReconnecting || module == null);
-        if (oneBotNotice.Length > 0)
-        {
-            b.OpenElement(seq++, "span");
-            b.AddAttribute(seq++, "class", "gs-hint2");
-            b.AddContent(seq++, oneBotNotice);
-            b.CloseElement();
-        }
-        b.CloseElement();
-    }
-
-    /// <summary>快速预设：两套常用组合，一键把监听/缓存参数改成对应风格。</summary>
-    void AddOneBotPresetRow(RenderTreeBuilder b, ref int seq)
-    {
-        b.OpenElement(seq++, "div");
-        b.AddAttribute(seq++, "class", "gs-listen-bar");
-        AddActionButton(b, ref seq, "开关监听式", ApplyDesktopPetPreset);
-        AddActionButton(b, ref seq, "随机触发式", ApplyGroupChatPreset);
-        b.CloseElement();
-        AddHint(b, ref seq, "开关监听式：把 QQ 当 AI 自己的娱乐工具，靠唤醒词 / @ 主动开监听，其余时间少插话。");
-        AddHint(b, ref seq, "随机触发式：低概率强制回复、缓存条数小，适合全天挂机的冒泡机器人，同时省词元。");
-    }
-
     void AddActionButton(RenderTreeBuilder b, ref int seq, string text, Action onClick, bool disabled = false)
     {
         b.OpenElement(seq++, "button");
@@ -863,56 +802,6 @@ public partial class QQModuleUI : ModuleUIBase<QQModule, QQConfig>, IDisposable
         b.AddAttribute(seq++, "onclick", EventCallback.Factory.Create<MouseEventArgs>(this, _ => onClick()));
         b.AddContent(seq++, text);
         b.CloseElement();
-    }
-
-    async void ReconnectOneBot()
-    {
-        QQModule? module = ResolveModule();
-        if (module == null)
-        {
-            oneBotNotice = "模块实例还没起来";
-            StateHasChanged();
-            return;
-        }
-        oneBotReconnecting = true;
-        oneBotNotice = "";
-        StateHasChanged();
-        try
-        {
-            await module.ReconnectOneBotAsync();
-            oneBotNotice = "重连指令已发送";
-        }
-        catch (Exception ex)
-        {
-            oneBotNotice = "重连失败：" + ex.Message;
-        }
-        finally
-        {
-            oneBotReconnecting = false;
-            StateHasChanged();
-        }
-    }
-
-    void ApplyDesktopPetPreset()
-    {
-        Configuration.DebounceEnabled = false;
-        Configuration.FlushInterval = 15f;
-        Configuration.MaxBufferMessages = -1;
-        Configuration.PerBufferSize = 5;
-        Configuration.ProactiveChatProbability = 0f;
-        Configuration.CloseGroupAfterReply = false;
-        StateHasChanged();
-    }
-
-    void ApplyGroupChatPreset()
-    {
-        Configuration.DebounceEnabled = true;
-        Configuration.FlushInterval = 3f;
-        Configuration.MaxBufferMessages = 5;
-        Configuration.PerBufferSize = 3;
-        Configuration.ProactiveChatProbability = 0.05f;
-        Configuration.CloseGroupAfterReply = true;
-        StateHasChanged();
     }
 
     void AddLabel(RenderTreeBuilder b, ref int seq, string text)

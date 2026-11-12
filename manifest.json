@@ -1,10 +1,8 @@
 ﻿{
-  "Version": "5.5.0",
+  "Version": "5.1.0",
   "Dependencies": {
     "Alife.Function.Speech": "",
-    "Alife.Function.FunctionCaller": "",
-    "Alife.Function.MessageFilter": "",
-    "Alife.Function.SystemEvent": ""
+    "Alife.Function.FunctionCaller": ""
   },
   "Environments": {
     "pip": {

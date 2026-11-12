@@ -9,6 +9,7 @@ using System.Net.Http;
 using System.Security.Cryptography;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using Alife.Foundation;
@@ -44,6 +45,16 @@ public partial class QQModule
     public async Task QQUploadMarkdownImage(string localPath)
     {
         string path = Need(localPath, "localPath");
+        (string imageId, string url) = await UploadMaterialImageAsync(path);
+        interactor.Poke("素材已上传：" + imageId
+            + "\nmarkdown 引用：" + url
+            + await MarkdownQuotaHintAsync());
+    }
+
+    /// <summary>上传一张本地图片到 markdown 素材库，返回 image_id 与 qqbot-media:// 引用。</summary>
+    internal async Task<(string ImageId, string Url)> UploadMaterialImageAsync(string localPath)
+    {
+        string path = localPath.Trim();
         FileInfo file = new(path);
         if (file.Exists == false)
         {
@@ -76,9 +87,87 @@ public partial class QQModule
             ["upload_id"] = uploadId,
             ["md5"] = etag
         }, DestroyCancellationToken);
-        interactor.Poke("素材已上传：" + QQJson.Text(done, "image_id")
-            + "\nmarkdown 引用：" + QQJson.Text(done, "url")
-            + "\n有效期 " + (QQJson.Integer(done, "ttl") / 86400.0).ToString("0", CultureInfo.InvariantCulture) + " 天（每次被消息引用后自动顺延）");
+        DetailLog("素材图已上传：" + QQJson.Text(done, "image_id")
+            + "，有效期 " + (QQJson.Integer(done, "ttl") / 86400.0).ToString("0", CultureInfo.InvariantCulture) + " 天");
+        return (QQJson.Text(done, "image_id"), QQJson.Text(done, "url"));
+    }
+
+    static readonly Regex markdownLocalImage = new(@"!\[([^\]]*)\]\(([^)\s]+)", RegexOptions.Compiled);
+
+    /// <summary>markdown 里写本地图片路径时：自动上传成素材，并把路径换成 qqbot-media:// 引用。一条消息最多处理 10 张。</summary>
+    async Task<string> PublishMarkdownImagesAsync(string markdown)
+    {
+        if (markdown.Contains("![", StringComparison.Ordinal) == false)
+        {
+            return markdown;
+        }
+        string result = markdown;
+        int published = 0;
+        foreach (Match match in markdownLocalImage.Matches(markdown))
+        {
+            string target = match.Groups[2].Value.Trim();
+            if (target.StartsWith("http", StringComparison.OrdinalIgnoreCase)
+                || target.StartsWith("qqbot-media://", StringComparison.OrdinalIgnoreCase)
+                || File.Exists(target) == false)
+            {
+                continue;
+            }
+            try
+            {
+                (_, string url) = await UploadMaterialImageAsync(target);
+                result = result.Replace(match.Groups[2].Value, url, StringComparison.Ordinal);
+                published++;
+                if (published >= 10)
+                {
+                    break;
+                }
+            }
+            catch (Exception ex)
+            {
+                DetailLog("markdown 内嵌图上传失败：" + target + "｜" + ex.Message);
+            }
+        }
+        return result;
+    }
+
+    /// <summary>按扩展名猜媒体类型，让 QQSendMedia 可以只给文件路径。</summary>
+    static string GuessMediaType(string pathOrUrl)
+    {
+        string clean = pathOrUrl ?? "";
+        int mark = clean.IndexOfAny(['?', '#']);
+        if (mark >= 0)
+        {
+            clean = clean[..mark];
+        }
+        return Path.GetExtension(clean).ToLowerInvariant() switch
+        {
+            ".png" or ".jpg" or ".jpeg" or ".gif" or ".webp" or ".bmp" => "image",
+            ".mp4" or ".mov" or ".m4v" or ".avi" or ".mkv" => "video",
+            ".silk" or ".slk" or ".sil" or ".mp3" or ".wav" or ".ogg" or ".amr" => "voice",
+            _ => "file"
+        };
+    }
+
+    /// <summary>素材配额提醒：平台上限 100 张，接近阈值时在返回值里带一句，提醒模型去删旧的。</summary>
+    async Task<string> MarkdownQuotaHintAsync()
+    {
+        int warnAt = Configuration.MarkdownImageWarnAt;
+        if (warnAt <= 0)
+        {
+            return "";
+        }
+        try
+        {
+            JsonElement body = await RequireRest().GetAsync(materialBase + "?cursor=", DestroyCancellationToken);
+            int total = (int)QQJson.Integer(body, "total");
+            return total >= warnAt
+                ? "\n【注意】素材已有 " + total.ToString(CultureInfo.InvariantCulture) + " 张（上限 100），建议先用 QQMarkdownImages 看一眼并用 QQDeleteMarkdownImage 清理旧的"
+                : "";
+        }
+        catch
+        {
+            return "";
+        }
     }
 
     [XmlFunction(FunctionMode.OneShot)]
@@ -569,6 +658,126 @@ public partial class QQModule
             + Math.Clamp(Configuration.VoiceMaxSeconds, 5, 3600).ToString(CultureInfo.InvariantCulture) + " 秒，响度归一化："
             + (Configuration.VoiceLoudnessNormalize ? "开" : "关")
             + "；转码缓存：" + Path.Combine(Path.GetTempPath(), voiceCacheFolder);
+    }
+
+    // ── 动图降级链 ─────────────────────────────────────────────
+
+    static readonly Dictionary<string, DateTime> rejectedImageOriginals = new(StringComparer.OrdinalIgnoreCase);
+
+    static bool IsAnimatedImage(string path) =>
+        path.EndsWith(".gif", StringComparison.OrdinalIgnoreCase) || path.EndsWith(".webp", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// 动图发送：原图直传 → APNG → 静态 PNG → 按文件。
+    /// 被平台拒过的原图 10 分钟内不再重试，免得每次发同一张图都先失败一次。
+    /// </summary>
+    async Task SendImageWithFallbackAsync(bool isGroup, string target, string localPath)
+    {
+        string original = Path.GetFullPath(localPath);
+        FileInfo source = new(original);
+        if (source.Exists == false)
+        {
+            throw new Exception("找不到文件：" + localPath);
+        }
+        string stamp = original + "|" + source.LastWriteTimeUtc.Ticks;
+        string mode = (Configuration.AnimatedImageMode ?? "auto").Trim().ToLowerInvariant();
+        if (mode == "file")
+        {
+            // 用户选了「原图按文件发」：保动画，但要点开下载
+            await SendMediaFileAsync(isGroup, target, 4, original);
+            return;
+        }
+        bool skipOriginal = mode == "static"
+            || (rejectedImageOriginals.TryGetValue(stamp, out DateTime rejectedAt)
+                && DateTime.UtcNow - rejectedAt < TimeSpan.FromMinutes(10));
+
+        string work = Path.Combine(Path.GetTempPath(), "qqofficial_img_" + Guid.NewGuid().ToString("N")[..8]);
+        Directory.CreateDirectory(work);
+        try
+        {
+            if (skipOriginal == false)
+            {
+                try
+                {
+                    await SendMediaFileAsync(isGroup, target, 1, original);
+                    return;
+                }
+                catch (Exception ex)
+                {
+                    rejectedImageOriginals[stamp] = DateTime.UtcNow;
+                    DetailLog("动图原图发送失败，转 APNG/PNG 再试：" + ex.Message);
+                }
+            }
+
+            string ffmpeg = FindFfmpeg();
+            if (ffmpeg.Length == 0)
+            {
+                throw new Exception("动图原图被平台拒了，转码需要 ffmpeg，但运行时与 PATH 都没找到");
+            }
+            // 扩展名保持 .png：平台按扩展名判图片类型，内容是不是 APNG 由它自己嗅探
+            string apng = Path.Combine(work, "anim.png");
+            if ((await RunToolAsync(ffmpeg, "-y -i \"" + original + "\" -plays 0 -f apng \"" + apng + "\"")).ExitCode == 0
+                && File.Exists(apng) && new FileInfo(apng).Length > 0)
+            {
+                try
+                {
+                    await SendMediaFileAsync(isGroup, target, 1, apng);
+                    DetailLog("动图已转 APNG 发出");
+                    return;
+                }
+                catch (Exception ex)
+                {
+                    DetailLog("APNG 发送失败：" + ex.Message);
+                }
+            }
+
+            string png = Path.Combine(work, "static.png");
+            if ((await RunToolAsync(ffmpeg, "-y -i \"" + original + "\" -frames:v 1 \"" + png + "\"")).ExitCode == 0
+                && File.Exists(png) && new FileInfo(png).Length > 0)
+            {
+                try
+                {
+                    await SendMediaFileAsync(isGroup, target, 1, png);
+                    DetailLog("动图已转静态 PNG 发出");
+                    return;
+                }
+                catch (Exception ex)
+                {
+                    DetailLog("静态 PNG 发送失败：" + ex.Message);
+                }
+            }
+
+            // 最后按文件发：原图还在，点开就能看
+            await SendMediaFileAsync(isGroup, target, 4, original);
+            interactor.Poke("[QQ官方机器人] 动图按图片发不出去，已降级成文件发出：" + Path.GetFileName(original));
+        }
+        finally
+        {
+            try
+            {
+                Directory.Delete(work, true);
+            }
+            catch
+            {
+                // 临时目录删不掉不影响结果
+            }
+        }
+    }
+
+    async Task SendMediaFileAsync(bool isGroup, string target, int fileType, string path)
+    {
+        string fileInfo = await UploadMediaAsync(isGroup, target, fileType, path, "");
+        JsonObject payload = new()
+        {
+            ["msg_type"] = 7,
+            ["media"] = new JsonObject { ["file_info"] = fileInfo }
+        };
+        string key = ConversationKey(isGroup, target);
+        if (lastInboundMessageId.TryGetValue(key, out string? recent) && recent.Length > 0)
+        {
+            payload["msg_id"] = recent;
+        }
+        await SendMessageAsync(isGroup, target, payload, "QQSendMedia");
     }
 
     static string FindTool(string executable)

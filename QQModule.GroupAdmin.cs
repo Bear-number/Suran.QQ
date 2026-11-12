@@ -69,6 +69,7 @@ public partial class QQModule
         + "文档写明：**成员还在群里时无法拉黑**（要先移除）。60 QPM，内邀能力")]
     public async Task QQGroupBlacklistOperate(string groupOpenid, string memberOpenids, string op = "add")
     {
+        RequireSensitiveTools();
         string action = op.Trim().ToLowerInvariant();
         if (action is not ("add" or "del"))
         {

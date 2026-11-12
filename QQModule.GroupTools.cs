@@ -2,10 +2,13 @@ using System;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Globalization;
+using System.IO;
 using System.Linq;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Threading.Tasks;
+using Alife.Foundation;
 using Alife.Function.FunctionCaller;
 using Microsoft.Extensions.Logging;
 
@@ -27,6 +30,15 @@ public partial class QQModule
     const int keyboardMaxRows = 5;
     const int keyboardMaxColumns = 5;
     const int keyboardDataMaxChars = 100;
+
+    /// <summary>高风险群管理工具的总开关：默认关，调用直接报错，避免模型手滑踢人/禁言。</summary>
+    void RequireSensitiveTools()
+    {
+        if (Configuration.EnableSensitiveTools == false)
+        {
+            throw new Exception("高风险群管理工具已在配置里关闭（「工具·高风险群管理」），确实要用请先打开它");
+        }
+    }
 
     [XmlFunction(FunctionMode.OneShot)]
     [Description("查群基本信息（群名、简介、分类、标签、成员数）。30 QPM，白名单能力，没权限回 11253 会原样报出")]
@@ -89,6 +101,7 @@ public partial class QQModule
         + "只能操作普通成员（群主、管理员、机器人会被拒）；minutes 最长 30 天；60 QPM")]
     public async Task QQGroupMuteMembers(string groupOpenid, string memberOpenids, int minutes = 60, string op = "add")
     {
+        RequireSensitiveTools();
         string action = op.Trim().ToLowerInvariant();
         if (action is not ("add" or "update" or "del"))
         {
@@ -121,6 +134,7 @@ public partial class QQModule
     [Description("查群禁言设置：全员禁言模式（none/always/schedule）与当前正在禁言的成员。30 QPM")]
     public async Task QQGroupMuteSetting(string groupOpenid)
     {
+        RequireSensitiveTools();
         JsonElement body = await RequireRest().GetAsync(groupsPath + Uri.EscapeDataString(Need(groupOpenid, "groupOpenid")) + "/restrict_chat_setting", DestroyCancellationToken);
         string mode = "none";
         if (body.TryGetProperty("global_rule", out JsonElement global) && global.ValueKind == JsonValueKind.Object)
@@ -171,6 +185,7 @@ public partial class QQModule
     [Description("审批一条入群申请：approve 通过、decline 拒绝（可带拒绝理由、可同时拉黑）。机器人得是群管理员。60 QPM")]
     public async Task QQGroupApproveJoinRequest(string groupOpenid, string memberOpenid, string joinRequestId, bool approve = true, string rejectReason = "", bool addToBlacklist = false)
     {
+        RequireSensitiveTools();
         string op = approve ? "approve" : "decline";
         JsonObject payload = new() { ["op"] = op };
         if (joinRequestId.Trim().Length > 0)
@@ -194,6 +209,7 @@ public partial class QQModule
     [Description("批量移除群成员，单次最多 20 人，可同时加入黑名单。文档标着「内邀接入中」，没权限会回 11253 并原样报出。30 QPM")]
     public async Task QQGroupRemoveMembers(string groupOpenid, string memberOpenids, bool addToBlacklist = false)
     {
+        RequireSensitiveTools();
         List<string> members = SplitIds(memberOpenids);
         if (members.Count == 0)
         {
@@ -239,14 +255,43 @@ public partial class QQModule
         return value.Trim();
     }
 
+    /// <summary>单个按钮的点击策略（来自按钮 JSON 的 once / ttl / limit）。</summary>
+    sealed class ButtonRule
+    {
+        public string Data = "";
+        public bool Once;
+        public int Limit;
+        public int TtlSeconds;
+    }
+
+    /// <summary>
+    /// 指令按钮的追踪前缀：发出去时给 data 加上，用户点回来后先按前缀认领、再把前缀剥掉。
+    /// 这样"用户正常发一句和 data 一样的文字"不会被误判成点按钮。
+    /// </summary>
+    const string buttonToken = "#qb#";
+
+    static string WithButtonToken(string data) =>
+        data.StartsWith(buttonToken, StringComparison.Ordinal) ? data : buttonToken + data;
+
+    static string StripButtonToken(string text) =>
+        text.StartsWith(buttonToken, StringComparison.Ordinal) ? text[buttonToken.Length..] : text;
+
+    /// <summary>一次发送的键盘结构与按钮策略。</summary>
+    sealed class KeyboardPlan
+    {
+        public JsonObject Keyboard = new();
+        public List<ButtonRule> Rules = new();
+    }
+
     /// <summary>
     /// 把模型常见的几种偷懒写法补成平台要的 keyboard 结构，省得每次都卡在格式上：
     ///   {"rows":[{"buttons":[{...}]}]}  —— 标准写法，只补齐缺失的 label / visited_label / style / type / data
     ///   [{"label":"A","data":"a"}, ...] —— 自动包成一行
     ///   [[{...}],[{...}]]               —— 每项一行
     /// 返回 null 时 problem 说明哪里不对。硬限制按平台：≤5 行 × 每行 ≤5 列、style 0/1、action.data ≤100 字符。
+    /// type=2 指令按钮默认补 enter=true（官方默认 false 只会把内容插进输入框，用户会以为按钮坏了）。
     /// </summary>
-    static JsonObject? NormalizeKeyboard(string keyboardJson, out string problem)
+    KeyboardPlan? BuildKeyboard(string keyboardJson, out string problem)
     {
         problem = "";
         JsonNode? parsed;
@@ -302,6 +347,7 @@ public partial class QQModule
             return null;
         }
 
+        KeyboardPlan plan = new();
         JsonArray normalizedRows = new();
         foreach (JsonNode? rowNode in rows)
         {
@@ -329,23 +375,29 @@ public partial class QQModule
                     problem = "按钮本身要是一个对象";
                     return null;
                 }
-                JsonObject? normalized = NormalizeButton(button, out problem);
+                JsonObject? normalized = NormalizeButton(button, out problem, out ButtonRule? rule);
                 if (normalized == null)
                 {
                     return null;
                 }
                 normalizedButtons.Add(normalized);
+                if (rule != null && rule.Data.Length > 0)
+                {
+                    plan.Rules.Add(rule);
+                }
             }
             normalizedRows.Add(new JsonObject { ["buttons"] = normalizedButtons });
         }
 
-        return new JsonObject { ["rows"] = normalizedRows };
+        plan.Keyboard["rows"] = normalizedRows;
+        return plan;
     }
 
     /// <summary>单个按钮：标准写法原样保留并补默认值；简化写法（label/data/style/type）拼成 render_data + action。</summary>
-    static JsonObject? NormalizeButton(JsonObject button, out string problem)
+    JsonObject? NormalizeButton(JsonObject button, out string problem, out ButtonRule? rule)
     {
         problem = "";
+        rule = null;
         JsonObject? render = button["render_data"] as JsonObject;
         JsonObject? action = button["action"] as JsonObject;
 
@@ -397,6 +449,11 @@ public partial class QQModule
             problem = "action.type 只认 0（跳转）/ 1（回调）/ 2（指令），给了 " + actionType.ToString(CultureInfo.InvariantCulture);
             return null;
         }
+        // 回调按钮降级：平台推不到互动事件时，改成指令按钮，点一下就发
+        if (actionType == 1 && Configuration.KeyboardCallbackToCommand)
+        {
+            actionType = 2;
+        }
 
         string data = action != null ? NodeText(action, "data") : "";
         if (data.Length == 0)
@@ -416,11 +473,31 @@ public partial class QQModule
             problem = "action.type=0 是跳转链接，data 必须是 http(s) 地址";
             return null;
         }
+        // 指令按钮点下去会以 data 作为一条普通消息回来：加追踪前缀，避免和正常聊天撞车
+        if (actionType == 2 && Configuration.ButtonPolicyToken)
+        {
+            data = WithButtonToken(data);
+        }
         if (data.Length > keyboardDataMaxChars)
         {
-            problem = "action.data 最长 " + keyboardDataMaxChars.ToString(CultureInfo.InvariantCulture) + " 字符，给了 " + data.Length.ToString(CultureInfo.InvariantCulture);
+            problem = "action.data 最长 " + keyboardDataMaxChars.ToString(CultureInfo.InvariantCulture) + " 字符（含自动加的追踪前缀），给了 " + data.Length.ToString(CultureInfo.InvariantCulture);
             return null;
         }
+
+        // 指令按钮默认「点一下就发」；显式写了 enter 就听它的
+        bool enter = actionType == 2;
+        if (action != null && bool.TryParse(NodeText(action, "enter"), out bool explicitEnter))
+        {
+            enter = explicitEnter;
+        }
+
+        rule = new ButtonRule
+        {
+            Data = data,
+            Once = NodeBool(button, "once"),
+            Limit = NodeInt(button, "limit"),
+            TtlSeconds = NodeInt(button, "ttl")
+        };
 
         string visited = render != null ? NodeText(render, "visited_label") : "";
         return new JsonObject
@@ -435,9 +512,257 @@ public partial class QQModule
             {
                 ["type"] = actionType,
                 ["data"] = data,
-                ["enter"] = false
+                ["enter"] = enter
             }
         };
+    }
+
+    // ── 按钮点击账本（限次/限人/截止）────────────────────────────
+
+    sealed class ButtonLedgerEntry
+    {
+        public DateTime ExpireAt = DateTime.MaxValue;
+        public int Limit;
+        public readonly Dictionary<string, int> Used = new(StringComparer.OrdinalIgnoreCase);
+    }
+
+    static readonly Dictionary<string, ButtonLedgerEntry> buttonLedger = new(StringComparer.Ordinal);
+    static bool buttonLedgerDirty;
+
+    string ButtonLedgerPath => Path.Combine(AlifePath.StorageFolderPath, Configuration.DataFolder.Trim(), "button-ledger.json");
+
+    /// <summary>启动时恢复账本：重启后「每人一次 / 限次」仍然成立；过期的条目直接丢。</summary>
+    void LoadButtonLedger()
+    {
+        if (Configuration.ButtonLedgerPersist == false || File.Exists(ButtonLedgerPath) == false)
+        {
+            return;
+        }
+        try
+        {
+            if (JsonNode.Parse(File.ReadAllText(ButtonLedgerPath)) is not JsonObject root)
+            {
+                return;
+            }
+            DateTime now = DateTime.Now;
+            foreach (KeyValuePair<string, JsonNode?> pair in root)
+            {
+                if (pair.Value is not JsonObject entry)
+                {
+                    continue;
+                }
+                long expireMs = (long)(entry["expire"]?.GetValue<long>() ?? 0);
+                DateTime expire = expireMs > 0
+                    ? DateTimeOffset.FromUnixTimeMilliseconds(expireMs).LocalDateTime
+                    : DateTime.MaxValue;
+                if (expire < now)
+                {
+                    continue;
+                }
+                ButtonLedgerEntry restored = new()
+                {
+                    ExpireAt = expire,
+                    Limit = (int)(entry["limit"]?.GetValue<int>() ?? 0)
+                };
+                if (entry["used"] is JsonObject used)
+                {
+                    foreach (KeyValuePair<string, JsonNode?> item in used)
+                    {
+                        if (item.Value != null)
+                        {
+                            restored.Used[item.Key] = item.Value.GetValue<int>();
+                        }
+                    }
+                }
+                buttonLedger[pair.Key] = restored;
+            }
+            DetailLog("按钮账本已恢复 " + buttonLedger.Count.ToString(CultureInfo.InvariantCulture) + " 条");
+        }
+        catch (Exception ex)
+        {
+            DetailLog("读按钮账本失败：" + ex.Message);
+        }
+    }
+
+    /// <summary>落盘账本。写失败只记日志，不影响点击判定。</summary>
+    void SaveButtonLedger()
+    {
+        if (Configuration.ButtonLedgerPersist == false)
+        {
+            buttonLedgerDirty = false;
+            return;
+        }
+        try
+        {
+            JsonObject root = new();
+            foreach (KeyValuePair<string, ButtonLedgerEntry> pair in buttonLedger)
+            {
+                JsonObject used = new();
+                foreach (KeyValuePair<string, int> item in pair.Value.Used)
+                {
+                    used[item.Key] = item.Value;
+                }
+                root[pair.Key] = new JsonObject
+                {
+                    ["expire"] = pair.Value.ExpireAt == DateTime.MaxValue
+                        ? 0
+                        : new DateTimeOffset(pair.Value.ExpireAt).ToUnixTimeMilliseconds(),
+                    ["limit"] = pair.Value.Limit,
+                    ["used"] = used
+                };
+            }
+            Directory.CreateDirectory(Path.GetDirectoryName(ButtonLedgerPath)!);
+            File.WriteAllText(ButtonLedgerPath, root.ToJsonString(), new UTF8Encoding(false));
+            buttonLedgerDirty = false;
+        }
+        catch (Exception ex)
+        {
+            DetailLog("写按钮账本失败：" + ex.Message);
+        }
+    }
+
+    /// <summary>发完键盘后登记每个按钮的策略；同一会话同一个 data 重发会重置计数（等于「新消息上的新按钮」）。</summary>
+    void RegisterButtons(bool isGroup, string targetId, KeyboardPlan plan)
+    {
+        if (Configuration.ButtonLimitEnabled == false || plan.Rules.Count == 0)
+        {
+            return;
+        }
+        string conversation = ConversationKey(isGroup, targetId);
+        DateTime now = DateTime.Now;
+        int defaultTtl = Math.Max(0, Configuration.ButtonDefaultTtlSeconds);
+        foreach (ButtonRule rule in plan.Rules)
+        {
+            int limit = rule.Limit > 0
+                ? rule.Limit
+                : (rule.Once || Configuration.ButtonDefaultOnce ? 1 : 0);
+            int ttl = rule.TtlSeconds > 0 ? rule.TtlSeconds : defaultTtl;
+            buttonLedger[conversation + "|" + rule.Data] = new ButtonLedgerEntry
+            {
+                ExpireAt = ttl > 0 ? now.AddSeconds(ttl) : DateTime.MaxValue,
+                Limit = limit
+            };
+        }
+        PruneButtonLedger();
+        buttonLedgerDirty = true;
+    }
+
+    /// <summary>入站消息像不像某个按钮被点；返回 true 表示这次点击超出策略、应当拦下。</summary>
+    async Task<bool> ButtonClickBlocked(bool isGroup, string targetId, string senderId, string content, string messageId)
+    {
+        if (Configuration.ButtonLimitEnabled == false)
+        {
+            return false;
+        }
+        string text = (content ?? "").Trim();
+        if (text.Length == 0)
+        {
+            return false;
+        }
+        string conversation = ConversationKey(isGroup, targetId);
+        foreach (string key in buttonLedger.Keys.ToList())
+        {
+            int split = key.IndexOf('|');
+            if (split < 0 || string.Equals(key[..split], conversation, StringComparison.Ordinal) == false)
+            {
+                continue;
+            }
+            string data = key[(split + 1)..];
+            if (data.Length == 0)
+            {
+                continue;
+            }
+            // 指令按钮点下去的内容通常是 data 本身，偶尔前面带 "@机器人 "
+            if (string.Equals(text, data, StringComparison.Ordinal) == false
+                && text.EndsWith(" " + data, StringComparison.Ordinal) == false)
+            {
+                continue;
+            }
+
+            ButtonLedgerEntry entry = buttonLedger[key];
+            string reason;
+            if (DateTime.Now > entry.ExpireAt)
+            {
+                reason = "按钮已过期";
+            }
+            else if (entry.Limit > 0)
+            {
+                entry.Used.TryGetValue(senderId, out int used);
+                if (used >= entry.Limit)
+                {
+                    reason = "该用户已经点过 " + used.ToString(CultureInfo.InvariantCulture) + " 次（上限 "
+                        + entry.Limit.ToString(CultureInfo.InvariantCulture) + "）";
+                }
+                else
+                {
+                    entry.Used[senderId] = used + 1;
+                    buttonLedgerDirty = true;
+                    return false;
+                }
+            }
+            else
+            {
+                return false;
+            }
+
+            DetailLog("按钮点击被策略拦下：" + reason + "｜data=" + data + "｜user=" + senderId);
+            if (Configuration.ButtonNotifyOnLimit)
+            {
+                interactor.Poke("[QQ按钮] " + (senderId.Length > 0 ? senderId + " 的点击" : "有人的点击")
+                    + "被策略拦下：" + reason + "（data=" + data + "），这条没有转给模型。");
+            }
+            if (Configuration.ButtonNotifyUserOnLimit && Configuration.ButtonLimitNotifyText.Trim().Length > 0)
+            {
+                await SendButtonLimitNoticeAsync(isGroup, targetId, messageId, Configuration.ButtonLimitNotifyText.Trim());
+            }
+            return true;
+        }
+        return false;
+    }
+
+    /// <summary>拦截提示发给用户：优先当这条点击的被动回复发；没有 msg_id 时按平台规则可能被拒，失败只记日志。</summary>
+    async Task SendButtonLimitNoticeAsync(bool isGroup, string targetId, string messageId, string text)
+    {
+        try
+        {
+            JsonObject payload = new()
+            {
+                ["msg_type"] = QQSendPolish.textType,
+                ["content"] = text
+            };
+            if (messageId.Length > 0)
+            {
+                payload["msg_id"] = messageId;
+                payload["msg_seq"] = NextMessageSeq(messageId);
+            }
+            await RequireRest().PostAsync(TargetPath(isGroup, targetId) + "/messages", payload, DestroyCancellationToken);
+        }
+        catch (Exception ex)
+        {
+            DetailLog("按钮拦截提示发送失败：" + ex.Message);
+        }
+    }
+
+    void PruneButtonLedger()
+    {
+        int max = Math.Max(50, Configuration.ButtonMaxEntries);
+        if (buttonLedger.Count <= max)
+        {
+            return;
+        }
+        DateTime now = DateTime.Now;
+        foreach (string stale in buttonLedger.Where(pair => pair.Value.ExpireAt < now).Select(pair => pair.Key).ToList())
+        {
+            buttonLedger.Remove(stale);
+        }
+        if (buttonLedger.Count <= max)
+        {
+            return;
+        }
+        foreach (string oldest in buttonLedger.OrderBy(pair => pair.Value.ExpireAt).Take(buttonLedger.Count - max).Select(pair => pair.Key).ToList())
+        {
+            buttonLedger.Remove(oldest);
+        }
     }
 
     /// <summary>从 JsonNode 里取字符串字段（JsonValue 才转，对象/数组一律当空）。</summary>
@@ -448,5 +773,16 @@ public partial class QQModule
             return value.ToString();
         }
         return "";
+    }
+
+    static int NodeInt(JsonNode? node, string name)
+    {
+        return int.TryParse(NodeText(node, name), out int value) ? value : 0;
+    }
+
+    static bool NodeBool(JsonNode? node, string name)
+    {
+        string raw = NodeText(node, name);
+        return raw.Equals("true", StringComparison.OrdinalIgnoreCase) || raw == "1";
     }
 }
