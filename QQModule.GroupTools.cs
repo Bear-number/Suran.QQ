@@ -306,7 +306,12 @@ public partial class QQModule
         }
 
         JsonArray rows;
-        if (parsed is JsonObject keyboard && keyboard["rows"] is JsonArray existingRows)
+        if (parsed is JsonObject keyboard && keyboard["content"] is JsonObject content && content["rows"] is JsonArray contentRows)
+        {
+            // 官方原样结构 keyboard.content.rows
+            rows = contentRows;
+        }
+        else if (parsed is JsonObject flatKeyboard && flatKeyboard["rows"] is JsonArray existingRows)
         {
             rows = existingRows;
         }
@@ -349,6 +354,7 @@ public partial class QQModule
 
         KeyboardPlan plan = new();
         JsonArray normalizedRows = new();
+        int buttonIndex = 0;
         foreach (JsonNode? rowNode in rows)
         {
             if (rowNode is not JsonObject row || row["buttons"] is not JsonArray buttons)
@@ -380,6 +386,11 @@ public partial class QQModule
                 {
                     return null;
                 }
+                // 平台要求每个按钮有唯一 id，没给就按顺序补
+                string buttonId = NodeText(button, "id");
+                normalized["id"] = buttonId.Length > 0
+                    ? buttonId
+                    : (++buttonIndex).ToString(CultureInfo.InvariantCulture);
                 normalizedButtons.Add(normalized);
                 if (rule != null && rule.Data.Length > 0)
                 {
@@ -389,7 +400,7 @@ public partial class QQModule
             normalizedRows.Add(new JsonObject { ["buttons"] = normalizedButtons });
         }
 
-        plan.Keyboard["rows"] = normalizedRows;
+        plan.Keyboard["content"] = new JsonObject { ["rows"] = normalizedRows };
         return plan;
     }
 
@@ -473,8 +484,9 @@ public partial class QQModule
             problem = "action.type=0 是跳转链接，data 必须是 http(s) 地址";
             return null;
         }
-        // 指令按钮点下去会以 data 作为一条普通消息回来：加追踪前缀，避免和正常聊天撞车
-        if (actionType == 2 && Configuration.ButtonPolicyToken)
+        // 指令按钮点下去会以 data 作为一条普通消息回来：加追踪前缀，避免和正常聊天撞车。
+        // 只有开了「按钮限次策略」才需要辨识点击，否则前缀只会把用户输入框里的文字弄脏
+        if (actionType == 2 && Configuration.ButtonPolicyToken && Configuration.ButtonLimitEnabled)
         {
             data = WithButtonToken(data);
         }
@@ -500,6 +512,8 @@ public partial class QQModule
         };
 
         string visited = render != null ? NodeText(render, "visited_label") : "";
+        string unsupportTips = action != null ? NodeText(action, "unsupport_tips") : "";
+        JsonNode? permission = action?["permission"]?.DeepClone();
         return new JsonObject
         {
             ["render_data"] = new JsonObject
@@ -511,7 +525,10 @@ public partial class QQModule
             ["action"] = new JsonObject
             {
                 ["type"] = actionType,
+                // 没写权限就按「所有人可点」，否则部分客户端会当成不可用按钮
+                ["permission"] = permission ?? new JsonObject { ["type"] = 2 },
                 ["data"] = data,
+                ["unsupport_tips"] = unsupportTips.Length > 0 ? unsupportTips : "当前版本不支持这个按钮，请升级 QQ",
                 ["enter"] = enter
             }
         };

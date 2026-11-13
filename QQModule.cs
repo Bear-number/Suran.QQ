@@ -14,7 +14,6 @@ using System.Threading;
 using System.Threading.Tasks;
 using Alife.Foundation;
 using Alife.Function.FunctionCaller;
-using Alife.Function.Speech;
 using Alife.Framework;
 using Microsoft.Extensions.Logging;
 
@@ -27,8 +26,7 @@ namespace Suran.QQ;
 public partial class QQModule(
     XmlFunctionCaller functionCaller,
     ILogger<QQModule> logger,
-    Interactor<QQModule> interactor,
-    ISpeechModel? speechModel = null
+    Interactor<QQModule> interactor
 ) : ChatBehaviour, IConfigurable<QQConfig>
 {
     public QQConfig Configuration { get; set; } = null!;
@@ -51,6 +49,7 @@ public partial class QQModule(
     DateTime lastIdentitySaved = DateTime.MinValue;
     static string gatewayStateText = "还没起连接";
     static readonly Dictionary<string, string> lastInboundMessageId = new();
+    static readonly Dictionary<string, string> lastBotMessageId = new();
     static readonly Dictionary<string, (DateTime ExpireAtUtc, int Times)> replyBudget = new();
     static readonly Dictionary<string, DateTime> seenEvents = new();
     static readonly Dictionary<string, int> typingFrames = new();
@@ -68,13 +67,24 @@ public partial class QQModule(
     {
         XmlHandler handler = new(this)
         {
-            Description = "QQ 官方机器人（q.qq.com 那套 OpenAPI）接入：收 QQ 群/私聊消息进会话、把回复与富媒体发回 QQ、群管理与按钮回调。",
-            Explanation = "这是 QQ 官方机器人的 HTTP + WebSocket 接口，目标 ID 全是 32 位十六进制 openid，不是 QQ 号也不是群号。"
+            Description = "QQ 官方机器人（q.qq.com OpenAPI）：收群/私聊消息进会话，回复、富媒体、按钮、群管理与频道都走这里。",
+            Explanation = "目标 ID 是 32 位十六进制 openid，不是 QQ 号也不是群号：群用 group_openid，私聊用 user_openid。"
                 + "注入进会话的消息首行形如 [QQ官方群聊消息(group_openid)] 或 [QQ官方私聊消息(user_openid)]，下一行是 [openid(昵称)]:正文。"
-                + "要回这条消息就用 QQSend（会自动带上可回复的 msg_id），直接发新内容用 QQSendText/QQSendMedia。"
-                + "被动回复有平台窗口（群 5 分钟最多 5 次、单聊 60 分钟最多 4 次），过期或超次数会如实报错，那时只能走主动消息且需要配置里放开。"
-                + "文档里有、但没单独封装成工具的端点（频道 ark 卡片、群文件、部分内邀/白名单能力）用 QQApi：method + 文档里的相对 path + JSON body。"
-                + "连不上、收不到事件先跑 QQEnv。"
+                + "\n出口怎么选："
+                + "\n· 回复当前这条 → QQSend（自动带上可回复的 msg_id，默认出口）；要引用着回就传 quoteMessageId=\"last\""
+                + "\n· 主动/另起一句 → QQSendText（同样支持 quoteMessageId=\"last\"）；要按钮 → QQSendButton，或给 QQSend/QQSendText 传 keyboardJson"
+                + "\n· 图片/视频/文件 → QQSendMedia；语音条 → QQSendVoice（自动 TTS + silk，不用自己找音频）"
+                + "\n· 撤回自己刚发的 → QQRecall，messageId 可留空撤最近一条（平台只给 2 分钟窗口）"
+                + "\n格式：纯文本最稳；要加粗、链接、按钮、markdown 图片素材才用 markdown，正文带 @ 时必须 markdown。"
+                + "按钮/引用/markdown 三者互斥：带按钮就是 markdown，引用会被丢掉；要引用就别带按钮和 markdown。"
+                + "按钮简化写法 [{\"label\":\"选项A\",\"data\":\"a\"}]，多行给二维数组，每行 ≤5 个、最多 5 行。"
+                + "自定义按钮需要「内邀」权限，没开通时按钮不渲染；那就改用开放平台申请到的按钮模版，传 keyboardId。"
+                + "群聊里指令按钮点了只会把 @机器人 data 放进输入框、要用户自己按发送（平台规定，私聊才会点完自动发），这时先用 QQSendText 说明一句就行。"
+                + "\n收信附件：图片/语音/视频只给链接；语音自带平台 ASR 文本，配置开了本地感官还会多一行「本地识别」「视觉描述」；文本类文件已读进上下文。"
+                + "不要再去调 VisionService/AuditoryService 重复处理同一份附件。"
+                + "\n限制：被动回复群 5 分钟 5 次、单聊 60 分钟 4 次（超了报 40034128），要接着说只能等对方再发或开「主动消息」；"
+                + "撤回只能撤机器人自己的、且 2 分钟内；qqo-xxx 显示态 id 不能直接拿去撤。"
+                + "\n没封装成工具的端点（频道 ark、群文件、部分白名单能力）用 QQApi：method + 文档相对 path + JSON body。连不上、收不到事件先跑 QQEnv。"
         };
         // 默认 Explicit：文档直接进「当前可用功能」，不再留 <name/> 入口等模型自己去翻；配置里可关掉改走隐式。
         functionCaller.RegisterHandler(handler,
@@ -497,7 +507,7 @@ public partial class QQModule(
         ".ini", ".toml", ".cs", ".py", ".js", ".ts", ".html", ".css", ".sql", ".bat", ".ps1", ".sh"
     ];
 
-    /// <summary>附件说明：图片/语音/视频只给链接与 ASR；文本类文件按配置把内容读进上下文。</summary>
+    /// <summary>附件说明：图片/语音/视频给链接；开了本地感官就再补语音转写与图片描述；文本类文件按配置读入上下文。</summary>
     async Task<string> DescribeAttachmentsAsync(JsonElement data)
     {
         List<string> lines = new();
@@ -516,6 +526,24 @@ public partial class QQModule(
             string fileName = QQJson.Text(item, "filename");
             lines.Add("\n[附件:" + label + "] " + url
                 + (QQJson.Text(item, "asr_refer_text").Length > 0 ? "（平台ASR文本：" + QQJson.Text(item, "asr_refer_text") + "）" : ""));
+
+            if (contentType == "voice")
+            {
+                string? heard = await TryHearVoiceAsync(url);
+                if (heard != null)
+                {
+                    lines.Add("\n[语音内容（本地识别）]" + heard);
+                }
+            }
+            else if (contentType.StartsWith("image/", StringComparison.OrdinalIgnoreCase))
+            {
+                string? seen = await TryDescribeImageAsync(url, contentType);
+                if (seen != null)
+                {
+                    lines.Add("\n[图片内容（视觉描述）]" + seen);
+                }
+            }
+
             string? content = await TryReadRemoteTextAsync(url, fileName, contentType);
             if (content != null)
             {
@@ -826,6 +854,7 @@ public partial class QQModule(
             payload.Remove("msg_seq");
             DetailLog(operation + " 被动窗口失效（" + ex.Code.ToString(CultureInfo.InvariantCulture) + "），已改走主动消息");
             result = await RequireRest().PostAsync(url, payload, DestroyCancellationToken);
+            RememberBotMessage(isGroup, targetId, result);
             OfficialAfterReply(isGroup, targetId.Trim());
             return result;
         }
@@ -833,9 +862,20 @@ public partial class QQModule(
         {
             RecordReply(messageId, limitSeconds);
         }
+        RememberBotMessage(isGroup, targetId, result);
         DetailLog(operation + " 成功：" + QQJson.Text(result, "id"));
         OfficialAfterReply(isGroup, targetId.Trim());
         return result;
+    }
+
+    /// <summary>记下机器人最近一条发出的消息 id，撤回时 messageId 可以不填。</summary>
+    void RememberBotMessage(bool isGroup, string targetId, JsonElement result)
+    {
+        string id = QQJson.Text(result, "id");
+        if (id.Length > 0)
+        {
+            lastBotMessageId[ConversationKey(isGroup, targetId.Trim())] = id;
+        }
     }
 
     /// <summary>同一个 msg_id 的每一句都要换新的 msg_seq，从 1 开始单调递增</summary>
@@ -865,8 +905,12 @@ public partial class QQModule(
 
     [XmlFunction(FunctionMode.Content)]
     [Description("把当前这轮的回复正文发到 QQ（收信注入后的默认出口）。targetType=group 传 group_openid，private 传 user_openid。"
-        + "要带按钮就加 keyboardJson：[{\"label\":\"选项A\",\"data\":\"a\"}] 这种简化写法即可，正文会自动转成 markdown + keyboard")]
-    public async Task QQSend(XmlExecutorContext ctx, string targetId, string targetType = "group", string keyboardJson = "")
+        + "要带按钮就加 keyboardJson：[{\"label\":\"选项A\",\"data\":\"a\"}] 这种简化写法即可，正文会自动转成 markdown + keyboard；"
+        + "自定义按钮在部分机器人上不显示，那就改传开放平台申请到的按钮模版 keyboardId。"
+        + "要引用着回复，quoteMessageId 填 \"last\"（引用本会话刚收到的那条）或真实 message id；"
+        + "带了按钮/markdown 时引用会被平台互斥规则丢掉，想引用就别带按钮")]
+    public async Task QQSend(XmlExecutorContext ctx, string targetId, string targetType = "group",
+        string keyboardJson = "", string quoteMessageId = "", string keyboardId = "")
     {
         if (ctx.CallMode != CallMode.Closing)
         {
@@ -889,7 +933,15 @@ public partial class QQModule(
             return;
         }
         JsonObject payload = BuildTextPayload(text, ConversationKey(isGroup, targetId.Trim()), isGroup);
-        if (keyboardJson.Trim().Length > 0)
+        if (keyboardId.Trim().Length > 0)
+        {
+            // 平台预设的按钮模版：普通机器人走这条，不用内邀的自定义按钮权限
+            payload["msg_type"] = QQSendPolish.markdownType;
+            payload["markdown"] = new JsonObject { ["content"] = text };
+            payload["keyboard"] = new JsonObject { ["id"] = keyboardId.Trim() };
+            payload.Remove("content");
+        }
+        else if (keyboardJson.Trim().Length > 0)
         {
             // 按钮只能挂在 markdown 上：正文原样当 markdown，再把按钮补进去
             KeyboardPlan? plan = BuildKeyboard(keyboardJson.Trim(), out string keyboardProblem);
@@ -904,6 +956,19 @@ public partial class QQModule(
             RegisterButtons(isGroup, targetId.Trim(), plan);
             // msg_type 改成 markdown 后，原来的纯文本字段要撤掉，别让平台同时收到 content 和 markdown
             payload.Remove("content");
+        }
+        string quote = ResolveQuoteId(isGroup, targetId, quoteMessageId);
+        if (quote.Length > 0)
+        {
+            if (payload.ContainsKey("markdown"))
+            {
+                // 平台只认一个：引用和 markdown 互斥，这里保正文/按钮
+                DetailLog("QQSend 的 markdown 与引用互斥，已自动丢掉引用：" + quote);
+            }
+            else
+            {
+                payload["message_reference"] = new JsonObject { ["message_id"] = quote };
+            }
         }
         try
         {
@@ -939,6 +1004,21 @@ public partial class QQModule(
         return payload;
     }
 
+    /// <summary>引用目标 id：留空不引用；"last"/"最近"/"上一条"/"刚刚" 取本会话最近收到的那条消息。</summary>
+    string ResolveQuoteId(bool isGroup, string targetId, string quoteMessageId)
+    {
+        string id = (quoteMessageId ?? "").Trim();
+        if (id.Length == 0)
+        {
+            return "";
+        }
+        if (id.Equals("last", StringComparison.OrdinalIgnoreCase) || id is "最近" or "上一条" or "刚刚")
+        {
+            return lastInboundMessageId.TryGetValue(ConversationKey(isGroup, targetId.Trim()), out string? cached) ? cached : "";
+        }
+        return id;
+    }
+
     bool IsGroupTarget(string targetType, out string error)
     {
         string want = targetType.Trim().ToLowerInvariant();
@@ -958,15 +1038,18 @@ public partial class QQModule(
     [XmlFunction(FunctionMode.OneShot)]
     [Description("主动往某个 QQ 会话发一条文本/markdown（不带上下文，走的是当前会话最近一条消息的被动回复额度；没有额度就按平台规则报错）。"
         + "要带按钮就给 keyboardJson：按钮数组简化写法 [{\"label\":\"选项A\",\"data\":\"a\"}] 就行，会自动转成 markdown+keyboard；"
-        + "只给 keyboardJson 不给 markdown 时，正文会自动按 markdown 发，不会报错；markdown 与引用同时给会自动丢掉引用")]
+        + "只给 keyboardJson 不给 markdown 时，正文会自动按 markdown 发，不会报错；markdown 与引用同时给会自动丢掉引用。"
+        + "自定义按钮不显示时改用开放平台申请到的按钮模版：传 keyboardId。"
+        + "quoteMessageId 填 \"last\" 可引用本会话刚收到的那条，或填真实 message id")]
     public async Task QQSendText(string targetId, string text, string targetType = "group", string markdown = "", string keyboardJson = "",
-        string atOpenids = "", string quoteMessageId = "")
+        string atOpenids = "", string quoteMessageId = "", string keyboardId = "")
     {
         bool isGroup = IsGroupTarget(targetType, out string targetError);
         if (targetError.Length > 0)
         {
             throw new Exception(targetError);
         }
+        quoteMessageId = ResolveQuoteId(isGroup, targetId, quoteMessageId);
         if (Configuration.EnableSend == false)
         {
             throw new Exception("配置里「开关·发送消息」是关的");
@@ -989,11 +1072,12 @@ public partial class QQModule(
         // markdown 里写本地图片路径时自动上传成素材并替换成 qqbot-media:// 引用
         body = await PublishMarkdownImagesAsync(body);
         bool wantsMarkdown = markdown.Trim().Length > 0 || at.Count > 0 || keyboardJson.Trim().Length > 0
+            || keyboardId.Trim().Length > 0
             || (Configuration.AtForceMarkdown && QQSendPolish.HasAtMarker(body));
         // 冲突取舍：选了「优先引用」且不是必须 markdown 的场景，就退回纯文本发引用
         if (string.Equals(Configuration.MediaConflictPrefer, "reference", StringComparison.OrdinalIgnoreCase)
             && wantsMarkdown && quoteMessageId.Trim().Length > 0
-            && keyboardJson.Trim().Length == 0 && at.Count == 0 && markdown.Trim().Length == 0
+            && keyboardJson.Trim().Length == 0 && keyboardId.Trim().Length == 0 && at.Count == 0 && markdown.Trim().Length == 0
             && Configuration.AtForceMarkdown == false)
         {
             wantsMarkdown = false;
@@ -1009,7 +1093,12 @@ public partial class QQModule(
         {
             payload["msg_type"] = QQSendPolish.markdownType;
             payload["markdown"] = new JsonObject { ["content"] = body };
-            if (keyboardJson.Trim().Length > 0)
+            if (keyboardId.Trim().Length > 0)
+            {
+                // 平台预设按钮模版：普通机器人走这条
+                payload["keyboard"] = new JsonObject { ["id"] = keyboardId.Trim() };
+            }
+            else if (keyboardJson.Trim().Length > 0)
             {
                 KeyboardPlan? plan = BuildKeyboard(keyboardJson.Trim(), out string keyboardProblem);
                 if (plan == null)
@@ -1045,20 +1134,12 @@ public partial class QQModule(
         + "text 就是要说的话；超过「语音·最长秒数」会被截断")]
     public async Task QQSendVoice(string targetId, string text, string targetType = "group")
     {
-        if (speechModel == null)
-        {
-            throw new Exception("当前语音合成不可用：宿主没注入语音模型");
-        }
         string say = (text ?? "").Trim();
         if (say.Length == 0)
         {
             throw new Exception("text 是空的");
         }
-        string? generated = await speechModel.GenerateSpeechFileAsync(say);
-        if (string.IsNullOrWhiteSpace(generated))
-        {
-            throw new Exception("语音合成失败");
-        }
+        string generated = await SynthesizeSpeechAsync(say);
         await QQSendMedia(targetId, "voice", generated, "", targetType);
     }
 
@@ -1304,16 +1385,26 @@ public partial class QQModule(
     }
 
     [XmlFunction(FunctionMode.OneShot)]
-    [Description("撤回一条本机器人发出去的消息。messageId 给发送回来的 id；显示态 qqo-xxx 那种要先换成真实 id，否则平台报 40061001")]
-    public async Task QQRecall(string targetId, string messageId, string targetType = "group")
+    [Description("撤回一条本机器人发出去的消息。messageId 留空 = 撤这个会话里机器人最近发的那条；"
+        + "显示态 qqo-xxx 那种要先换成真实 id，否则平台报 40061001；官方撤回窗口只有 2 分钟")]
+    public async Task QQRecall(string targetId, string messageId = "", string targetType = "group")
     {
         bool isGroup = IsGroupTarget(targetType, out string targetError);
         if (targetError.Length > 0)
         {
             throw new Exception(targetError);
         }
-        await RequireRest().DeleteAsync(TargetPath(isGroup, targetId.Trim()) + "/messages/" + Uri.EscapeDataString(messageId.Trim()), DestroyCancellationToken);
-        interactor.Poke("[QQ官方机器人] 已撤回 " + messageId.Trim() + "（官方撤回窗口只有 2 分钟）");
+        string id = (messageId ?? "").Trim();
+        if (id.Length == 0 && lastBotMessageId.TryGetValue(ConversationKey(isGroup, targetId.Trim()), out string? remembered))
+        {
+            id = remembered;
+        }
+        if (id.Length == 0)
+        {
+            throw new Exception("不知道要撤哪条：这个会话里没记录到机器人发过的消息，请把发送时返回的 id 传进来");
+        }
+        await RequireRest().DeleteAsync(TargetPath(isGroup, targetId.Trim()) + "/messages/" + Uri.EscapeDataString(id), DestroyCancellationToken);
+        interactor.Poke("[QQ官方机器人] 已撤回 " + id + "（官方撤回窗口只有 2 分钟）");
     }
 
     [XmlFunction(FunctionMode.OneShot)]

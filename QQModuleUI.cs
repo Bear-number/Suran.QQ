@@ -166,6 +166,23 @@ public partial class QQModuleUI : ModuleUIBase<QQModule, QQConfig>, IDisposable
                 v => Configuration.InboundFileMaxChars = v, 0, 20000);
             AddHint(b, ref i, "收到的文本类附件（txt/log/json/md/csv 等）读进上下文的最大字数，默认 4000；0 = 只给链接不读内容。");
 
+            AddSwitch(b, ref i, "语音本地识别", Configuration.InboundSpeechRecognition,
+                v => Configuration.InboundSpeechRecognition = v);
+            AddHint(b, ref i, "开：把收到的语音下载下来，交给本机听觉模型（SenseVoice 等）转成文字补进上下文。"
+                + "支持 QQ 的 silk 格式；没装听觉模型或识别失败会自动跳过。默认关。");
+
+            AddSwitch(b, ref i, "图片自动描述", Configuration.InboundImageCaption,
+                v => Configuration.InboundImageCaption = v);
+            AddHint(b, ref i, "开：把收到的图片交给视觉模型描述后写进上下文。每张图都是一次视觉推理（在线模型还计费），默认关。");
+
+            AddTextArea(b, ref i, "图片描述提示词", Configuration.InboundImagePrompt,
+                v => Configuration.InboundImagePrompt = v, "发给视觉模型的问题，留空用默认");
+            AddHint(b, ref i, "默认要求精简描述人物、文字和场景；图里有需要特别关注的东西时可以改。");
+
+            AddNumberInput(b, ref i, "感官结果字数上限", Configuration.InboundSenseMaxChars,
+                v => Configuration.InboundSenseMaxChars = v, 50, 2000);
+            AddHint(b, ref i, "本地语音识别文本、图片描述各自写进上下文的最大字数，默认 300。");
+
             AddLabeledSelect(b, ref i, Configuration.AtMarkupStyle,
                 v => Configuration.AtMarkupStyle = v, AtStyleOptions);
             AddHint(b, ref i, "发送 @ 时用的标记形态。部分环境会把 new 形态当纯文本，默认 legacy 更稳。");
@@ -205,7 +222,8 @@ public partial class QQModuleUI : ModuleUIBase<QQModule, QQConfig>, IDisposable
 
             AddSwitch(b, ref i, "追踪前缀", Configuration.ButtonPolicyToken,
                 v => Configuration.ButtonPolicyToken = v);
-            AddHint(b, ref i, "开：给指令按钮的 data 自动加 #qb# 前缀，点回来后剥掉。防止用户正常发一句和 data 一样的文字被误判成点击。");
+            AddHint(b, ref i, "开：给指令按钮的 data 自动加 #qb# 前缀，点回来后剥掉，防止用户正常发一句和 data 一样的文字被误判成点击。"
+                + "只在开了「按钮限次策略」时才加——群聊里这个前缀会原样出现在用户输入框里。");
 
             AddSwitch(b, ref i, "默认每人一次", Configuration.ButtonDefaultOnce,
                 v => Configuration.ButtonDefaultOnce = v);

@@ -202,6 +202,22 @@ public class QQConfig
     [Description("收到的文本类附件（txt/log/json/md/csv 等）读进上下文的最大字数，默认 4000；0 = 不读")]
     public int InboundFileMaxChars { get; set; } = 4000;
 
+    [DisplayName("收信·语音本地识别")]
+    [Description("开：把收到的语音下载下来，交给本机听觉模型（SenseVoice 等）转成文字补进上下文。没装听觉模型时自动跳过，默认关")]
+    public bool InboundSpeechRecognition { get; set; } = false;
+
+    [DisplayName("收信·图片自动描述")]
+    [Description("开：把收到的图片交给视觉模型描述后写进上下文。每张图都是一次视觉推理（在线模型还计费），默认关")]
+    public bool InboundImageCaption { get; set; } = false;
+
+    [DisplayName("收信·图片描述提示词")]
+    [Description("发给视觉模型的问题，留空用默认的精简描述")]
+    public string InboundImagePrompt { get; set; } = "";
+
+    [DisplayName("收信·感官结果字数上限")]
+    [Description("本地语音识别文本、图片描述写进上下文时各自最多保留多少字，默认 300")]
+    public int InboundSenseMaxChars { get; set; } = 300;
+
     [DisplayName("输入状态·延时(秒)")]
     [Description("收到私聊后隔多久才显示「正在输入」，默认 2 秒；0 = 立刻")]
     public int TypingDelaySeconds { get; set; } = 2;

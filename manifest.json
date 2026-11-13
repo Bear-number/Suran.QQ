@@ -1,7 +1,6 @@
 ﻿{
-  "Version": "5.1.0",
+  "Version": "5.2.6",
   "Dependencies": {
-    "Alife.Function.Speech": "",
     "Alife.Function.FunctionCaller": ""
   },
   "Environments": {
