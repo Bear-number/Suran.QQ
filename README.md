@@ -16,7 +16,7 @@
 
 ## 安装
 
-先装依赖：`Alife.Function.Speech`、`Alife.Function.FunctionCaller`。
+先装依赖：`Alife.Function.FunctionCaller`。
 
 装法二选一：插件市场里搜 `Suran.QQ`；或把目录放到 `Storage/Plugins/Suran.QQ/`，重启角色生效。
 
@@ -75,6 +75,10 @@
 | 按钮·拦截时提示用户 | `ButtonNotifyUserOnLimit` | 开：点击被拦下时直接给对方回一句提示（占用一次被动回复额度），默认关 | `—` |
 | 按钮·用户提示文案 | `ButtonLimitNotifyText` | 上面那项打开后发给用户的固定文案 | `"这个按钮已经用过啦"` |
 | 收信·读取文件内容上限(字) | `InboundFileMaxChars` | 收到的文本类附件（txt/log/json/md/csv 等）读进上下文的最大字数，默认 4000；0 = 不读 | `4000` |
+| 收信·语音本地识别 | `InboundSpeechRecognition` | 开：把收到的语音下载下来，交给本机听觉模型（SenseVoice 等）转成文字补进上下文。没装听觉模型时自动跳过，默认关 | `false` |
+| 收信·视觉自动描述 | `InboundImageCaption` |  | `false` |
+| 收信·图片描述提示词 | `InboundImagePrompt` | 发给视觉模型的问题，留空用默认的精简描述 | `""` |
+| 收信·感官结果字数上限 | `InboundSenseMaxChars` | 本地语音识别文本、图片描述写进上下文时各自最多保留多少字，默认 300 | `300` |
 | 输入状态·延时(秒) | `TypingDelaySeconds` | 收到私聊后隔多久才显示「正在输入」，默认 2 秒；0 = 立刻 | `2` |
 | 输入状态·防抖(秒) | `TypingDebounceSeconds` | 同一个人刚显示过状态后，这么多秒内不再重复显示，默认 3 秒；0 = 不防抖 | `3` |
 | 输入状态·主动也显示 | `TypingAllowProactive` | 开：没有被动 msg_id 时也发一帧主动状态（占主动额度），默认开 | `true` |
