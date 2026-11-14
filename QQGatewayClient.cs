@@ -24,7 +24,7 @@ public class QQGatewayClient(
     QQConfig config,
     QQAccessToken accessToken,
     Func<string, JsonElement, Task> handleEvent,
-    Action<string>? logDetail)
+    Action<string> logDetail)
 {
     static readonly int[] fatalCloseCodes = [4001, 4002, 4010, 4011, 4012, 4013, 4014];
     const int maxConsecutiveFatalCloses = 3;

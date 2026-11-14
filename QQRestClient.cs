@@ -18,7 +18,7 @@ namespace Suran.QQ;
 /// ③ 发送类接口有去重与配额（同 msg_id+msg_seq 重发报 40054005、主动消息超配额报 40034100），
 ///    所以**只对 GET 重试一次**，POST/DELETE 一律失败就如实抛，不在这里偷偷重发。
 /// </summary>
-public class QQRestClient(QQConfig config, QQAccessToken accessToken, Action<string>? logDetail)
+public class QQRestClient(QQConfig config, QQAccessToken accessToken, Action<string> logDetail)
 {
     const string BrowserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36";
     const int authCodeAppIdFailed = 630002;
@@ -33,7 +33,7 @@ public class QQRestClient(QQConfig config, QQAccessToken accessToken, Action<str
         string key = proxy + "@" + timeout.ToString();
         lock (clients)
         {
-            if (clients.TryGetValue(key, out HttpClient? cached))
+            if (clients.TryGetValue(key, out HttpClient cached))
             {
                 return cached;
             }
@@ -58,20 +58,20 @@ public class QQRestClient(QQConfig config, QQAccessToken accessToken, Action<str
     public Task<JsonElement> GetAsync(string path, CancellationToken cancelToken) =>
         SendAsync(HttpMethod.Get, path, null, allowAuthRetry: true, allowTransportRetry: true, cancelToken);
 
-    public Task<JsonElement> PostAsync(string path, JsonObject? body, CancellationToken cancelToken) =>
+    public Task<JsonElement> PostAsync(string path, JsonObject body, CancellationToken cancelToken) =>
         SendAsync(HttpMethod.Post, path, body, allowAuthRetry: true, allowTransportRetry: false, cancelToken);
 
-    public Task<JsonElement> PutAsync(string path, JsonObject? body, CancellationToken cancelToken) =>
+    public Task<JsonElement> PutAsync(string path, JsonObject body, CancellationToken cancelToken) =>
         SendAsync(HttpMethod.Put, path, body, allowAuthRetry: true, allowTransportRetry: false, cancelToken);
 
     /// <summary>文档里「修改子频道」「修改入群审批策略」用的都是 PATCH，别拿 PUT 凑。</summary>
-    public Task<JsonElement> PatchAsync(string path, JsonObject? body, CancellationToken cancelToken) =>
+    public Task<JsonElement> PatchAsync(string path, JsonObject body, CancellationToken cancelToken) =>
         SendAsync(HttpMethod.Patch, path, body, allowAuthRetry: true, allowTransportRetry: false, cancelToken);
 
     public Task<JsonElement> DeleteAsync(string path, CancellationToken cancelToken) =>
         SendAsync(HttpMethod.Delete, path, null, allowAuthRetry: true, allowTransportRetry: false, cancelToken);
 
-    async Task<JsonElement> SendAsync(HttpMethod method, string path, JsonObject? body, bool allowAuthRetry, bool allowTransportRetry, CancellationToken cancelToken)
+    async Task<JsonElement> SendAsync(HttpMethod method, string path, JsonObject body, bool allowAuthRetry, bool allowTransportRetry, CancellationToken cancelToken)
     {
         string token = await accessToken.RequireAsync(cancelToken);
         try
@@ -93,7 +93,7 @@ public class QQRestClient(QQConfig config, QQAccessToken accessToken, Action<str
 
     static bool IsAuthFailure(QQApiException error) => error.Code == authCodeAppIdFailed || error.Code == 401 || error.Code == 403;
 
-    async Task<JsonElement> RequestAsync(HttpMethod method, string path, JsonObject? body, string token, CancellationToken cancelToken)
+    async Task<JsonElement> RequestAsync(HttpMethod method, string path, JsonObject body, string token, CancellationToken cancelToken)
     {
         using HttpRequestMessage request = new(method, BaseUrl + path);
         request.Headers.TryAddWithoutValidation("Authorization", "QQBot " + token);

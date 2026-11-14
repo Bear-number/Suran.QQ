@@ -22,7 +22,7 @@ namespace Suran.QQ;
 /// ② 昵称与已记录不同就覆盖 ⇒ 用户改名自动跟随；③ **QQ 号只做有依据的绑定**（人工绑定、内邀字段、
 /// 或由另一条 QQ 通道对撞出的唯一昵称配对），重名一律不猜。
 /// </summary>
-public class QQIdentityStore(string folder, Action<string>? logDetail)
+public class QQIdentityStore(string folder, Action<string> logDetail)
 {
     const string fileName = "identities.json";
     const string peersFileName = "qq_peers.txt";
@@ -97,7 +97,7 @@ public class QQIdentityStore(string folder, Action<string>? logDetail)
             return false;
         }
         string clean = nickname.Trim();
-        if (people.TryGetValue(openid, out Person? known) && known != null)
+        if (people.TryGetValue(openid, out Person known) && known != null)
         {
             if (known.Nickname == clean)
             {
@@ -116,7 +116,7 @@ public class QQIdentityStore(string folder, Action<string>? logDetail)
 
     public bool RememberGroupName(string groupOpenid, string name)
     {
-        if (groupOpenid.Length == 0 || name.Trim().Length == 0 || groupNames.TryGetValue(groupOpenid, out string? have) && have == name.Trim())
+        if (groupOpenid.Length == 0 || name.Trim().Length == 0 || groupNames.TryGetValue(groupOpenid, out string have) && have == name.Trim())
         {
             return false;
         }
@@ -125,7 +125,7 @@ public class QQIdentityStore(string folder, Action<string>? logDetail)
         return true;
     }
 
-    public string GroupName(string groupOpenid) => groupNames.TryGetValue(groupOpenid, out string? name) ? name : "";
+    public string GroupName(string groupOpenid) => groupNames.TryGetValue(groupOpenid, out string name) ? name : "";
 
     /// <summary>已知群（openid → 群名）的副本，给设置页列群用。复制一份是为了避免和消息线程抢字典。</summary>
     public Dictionary<string, string> GroupNamesSnapshot()
@@ -147,7 +147,7 @@ public class QQIdentityStore(string folder, Action<string>? logDetail)
         {
             return;
         }
-        if (people.TryGetValue(openid, out Person? person) == false || person == null)
+        if (people.TryGetValue(openid, out Person person) == false || person == null)
         {
             person = new Person();
             people[openid] = person;
@@ -167,7 +167,7 @@ public class QQIdentityStore(string folder, Action<string>? logDetail)
     /// <summary>注入会话时用的显示名：备注名优先，其次 QQ号+昵称，再次昵称，都没有就明说"昵称未知"</summary>
     public string DisplayName(string openid)
     {
-        if (people.TryGetValue(openid, out Person? person) == false || person == null)
+        if (people.TryGetValue(openid, out Person person) == false || person == null)
         {
             return "昵称未知";
         }
@@ -182,7 +182,7 @@ public class QQIdentityStore(string folder, Action<string>? logDetail)
         return person.QqNumber.Length > 0 ? "昵称未知／QQ " + person.QqNumber : "昵称未知";
     }
 
-    public string QqNumberOf(string openid) => people.TryGetValue(openid, out Person? person) && person != null ? person.QqNumber : "";
+    public string QqNumberOf(string openid) => people.TryGetValue(openid, out Person person) && person != null ? person.QqNumber : "";
 
     /// <summary>
     /// 从另一条 QQ 通道对撞学 QQ 号：`qq_peers.txt` 每行「昵称<TAB>QQ号」（由那条通道的接入方写）。
@@ -213,7 +213,7 @@ public class QQIdentityStore(string folder, Action<string>? logDetail)
             {
                 continue;
             }
-            if (byName.TryGetValue(person.Nickname, out List<string>? numbers) == false)
+            if (byName.TryGetValue(person.Nickname, out List<string> numbers) == false)
             {
                 continue;
             }

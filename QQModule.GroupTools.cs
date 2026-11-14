@@ -291,10 +291,10 @@ public partial class QQModule
     /// 返回 null 时 problem 说明哪里不对。硬限制按平台：≤5 行 × 每行 ≤5 列、style 0/1、action.data ≤100 字符。
     /// type=2 指令按钮默认补 enter=true（官方默认 false 只会把内容插进输入框，用户会以为按钮坏了）。
     /// </summary>
-    KeyboardPlan? BuildKeyboard(string keyboardJson, out string problem)
+    KeyboardPlan BuildKeyboard(string keyboardJson, out string problem)
     {
         problem = "";
-        JsonNode? parsed;
+        JsonNode parsed;
         try
         {
             parsed = JsonNode.Parse(keyboardJson);
@@ -320,7 +320,7 @@ public partial class QQModule
             rows = new JsonArray();
             if (array.Count > 0 && array[0] is JsonArray)
             {
-                foreach (JsonNode? rowNode in array)
+                foreach (JsonNode rowNode in array)
                 {
                     if (rowNode is not JsonArray rowArray)
                     {
@@ -355,7 +355,7 @@ public partial class QQModule
         KeyboardPlan plan = new();
         JsonArray normalizedRows = new();
         int buttonIndex = 0;
-        foreach (JsonNode? rowNode in rows)
+        foreach (JsonNode rowNode in rows)
         {
             if (rowNode is not JsonObject row || row["buttons"] is not JsonArray buttons)
             {
@@ -374,14 +374,14 @@ public partial class QQModule
             }
 
             JsonArray normalizedButtons = new();
-            foreach (JsonNode? buttonNode in buttons)
+            foreach (JsonNode buttonNode in buttons)
             {
                 if (buttonNode is not JsonObject button)
                 {
                     problem = "按钮本身要是一个对象";
                     return null;
                 }
-                JsonObject? normalized = NormalizeButton(button, out problem, out ButtonRule? rule);
+                JsonObject normalized = NormalizeButton(button, out problem, out ButtonRule rule);
                 if (normalized == null)
                 {
                     return null;
@@ -405,12 +405,12 @@ public partial class QQModule
     }
 
     /// <summary>单个按钮：标准写法原样保留并补默认值；简化写法（label/data/style/type）拼成 render_data + action。</summary>
-    JsonObject? NormalizeButton(JsonObject button, out string problem, out ButtonRule? rule)
+    JsonObject NormalizeButton(JsonObject button, out string problem, out ButtonRule rule)
     {
         problem = "";
         rule = null;
-        JsonObject? render = button["render_data"] as JsonObject;
-        JsonObject? action = button["action"] as JsonObject;
+        JsonObject render = button["render_data"] as JsonObject;
+        JsonObject action = button["action"] as JsonObject;
 
         string label = render != null ? NodeText(render, "label") : "";
         if (label.Length == 0)
@@ -513,7 +513,7 @@ public partial class QQModule
 
         string visited = render != null ? NodeText(render, "visited_label") : "";
         string unsupportTips = action != null ? NodeText(action, "unsupport_tips") : "";
-        JsonNode? permission = action?["permission"]?.DeepClone();
+        JsonNode permission = action?["permission"]?.DeepClone();
         return new JsonObject
         {
             ["render_data"] = new JsonObject
@@ -562,7 +562,7 @@ public partial class QQModule
                 return;
             }
             DateTime now = DateTime.Now;
-            foreach (KeyValuePair<string, JsonNode?> pair in root)
+            foreach (KeyValuePair<string, JsonNode> pair in root)
             {
                 if (pair.Value is not JsonObject entry)
                 {
@@ -583,7 +583,7 @@ public partial class QQModule
                 };
                 if (entry["used"] is JsonObject used)
                 {
-                    foreach (KeyValuePair<string, JsonNode?> item in used)
+                    foreach (KeyValuePair<string, JsonNode> item in used)
                     {
                         if (item.Value != null)
                         {
@@ -783,7 +783,7 @@ public partial class QQModule
     }
 
     /// <summary>从 JsonNode 里取字符串字段（JsonValue 才转，对象/数组一律当空）。</summary>
-    static string NodeText(JsonNode? node, string name)
+    static string NodeText(JsonNode node, string name)
     {
         if (node is JsonObject obj && obj[name] is JsonValue value)
         {
@@ -792,12 +792,12 @@ public partial class QQModule
         return "";
     }
 
-    static int NodeInt(JsonNode? node, string name)
+    static int NodeInt(JsonNode node, string name)
     {
         return int.TryParse(NodeText(node, name), out int value) ? value : 0;
     }
 
-    static bool NodeBool(JsonNode? node, string name)
+    static bool NodeBool(JsonNode node, string name)
     {
         string raw = NodeText(node, name);
         return raw.Equals("true", StringComparison.OrdinalIgnoreCase) || raw == "1";

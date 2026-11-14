@@ -336,7 +336,7 @@ public partial class QQModule
         {
             return "items 最多 " + menuMaxItems.ToString(CultureInfo.InvariantCulture) + " 个，给了 " + items.Count.ToString(CultureInfo.InvariantCulture);
         }
-        foreach (JsonNode? raw in items)
+        foreach (JsonNode raw in items)
         {
             if (raw is not JsonObject item)
             {

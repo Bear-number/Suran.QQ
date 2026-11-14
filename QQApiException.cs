@@ -57,7 +57,7 @@ public class QQApiException(string operation, int code, string message, string t
 
     static string Describe(string operation, int code, string message, string traceId)
     {
-        string hint = hints.TryGetValue(code, out string? text) ? "｜" + text : "";
+        string hint = hints.TryGetValue(code, out string text) ? "｜" + text : "";
         string trace = traceId.Length > 0 ? "｜trace " + traceId : "";
         return operation + " 失败：" + code.ToString(CultureInfo.InvariantCulture) + " " + message + hint + trace;
     }
@@ -98,6 +98,6 @@ public class QQApiException(string operation, int code, string message, string t
             : null;
     }
 
-    static string? ReadString(JsonElement body, string name) =>
+    static string ReadString(JsonElement body, string name) =>
         body.TryGetProperty(name, out JsonElement value) && value.ValueKind == JsonValueKind.String ? value.GetString() : null;
 }

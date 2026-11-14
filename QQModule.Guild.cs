@@ -22,7 +22,7 @@ public partial class QQModule
 {
     // ── 公共小工具 ──────────────────────────────────────────────
 
-    async Task<string> InvokeAsync(string method, string path, JsonObject? body = null)
+    async Task<string> InvokeAsync(string method, string path, JsonObject body = null)
     {
         JsonElement result = method switch
         {

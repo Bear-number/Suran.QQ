@@ -487,7 +487,7 @@ public partial class QQModule
     static string BundledEncoderArgs(int rate) =>
         "\"" + BundledSilkScript() + "\" {in} {out} " + rate.ToString(CultureInfo.InvariantCulture);
 
-    static string? bundledSilkScriptCache;
+    static string bundledSilkScriptCache;
 
     /// <summary>插件目录里的 tools/to_silk.py；插件改名或换目录时退化为在 Plugins 下扫一遍。</summary>
     static string BundledSilkScript()
@@ -773,7 +773,7 @@ public partial class QQModule
             ["media"] = new JsonObject { ["file_info"] = fileInfo }
         };
         string key = ConversationKey(isGroup, target);
-        if (lastInboundMessageId.TryGetValue(key, out string? recent) && recent.Length > 0)
+        if (lastInboundMessageId.TryGetValue(key, out string recent) && recent.Length > 0)
         {
             payload["msg_id"] = recent;
         }

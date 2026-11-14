@@ -14,7 +14,7 @@ namespace Suran.QQ;
 /// 不会刷新；只有进入到期前 60 秒内再取才会换新 token，而旧 token 在这 60 秒内仍然有效——所以提前量必须明显大于 60 秒，
 /// 这里取 180 秒。失败是响应体里的 code，且 HTTP 仍回 200。token 与 AppSecret 都不写日志、不进返回值。
 /// </summary>
-public class QQAccessToken(QQConfig config, Action<string>? logDetail)
+public class QQAccessToken(QQConfig config, Action<string> logDetail)
 {
     public const string DefaultApiBaseUrl = "https://api.bot.qq.com";
     public static readonly TimeSpan RenewSafetyWindow = TimeSpan.FromSeconds(180);

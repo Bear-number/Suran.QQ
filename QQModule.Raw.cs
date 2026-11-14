@@ -27,7 +27,7 @@ public partial class QQModule
             throw new Exception("path 要是相对路径，例如 /guilds/123456/roles；不带域名、以 / 开头");
         }
 
-        JsonObject? payload = null;
+        JsonObject payload = null;
         string raw = (body ?? "").Trim();
         if (raw.Length > 0)
         {

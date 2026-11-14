@@ -91,7 +91,7 @@ public partial class QQModule
             foreach (string groupId in ids)
             {
                 string name = identities == null ? "" : identities.GroupName(groupId);
-                if (officialGroups.TryGetValue(groupId, out OfficialGroupState? state))
+                if (officialGroups.TryGetValue(groupId, out OfficialGroupState state))
                 {
                     double flushLeft = Configuration.GroupFlushSeconds - (now - state.LastFlush).TotalSeconds;
                     double closeLeft = Configuration.GroupAutoCloseMinutes - (now - state.LastUse).TotalMinutes;
@@ -149,7 +149,7 @@ public partial class QQModule
         }
         lock (officialGate)
         {
-            if (officialGroups.TryGetValue(groupId, out OfficialGroupState? state) == false)
+            if (officialGroups.TryGetValue(groupId, out OfficialGroupState state) == false)
             {
                 return false;
             }
@@ -158,7 +158,7 @@ public partial class QQModule
         return true;
     }
 
-    static string[] SplitList(string? raw) =>
+    static string[] SplitList(string raw) =>
         (raw ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 
     string GroupMode() => (Configuration.GroupMessageMode ?? "at").Trim().ToLowerInvariant();
@@ -269,7 +269,7 @@ public partial class QQModule
         lock (officialGate)
         {
             string key = head;
-            if (officialPrivates.TryGetValue(key, out OfficialPrivateState? state) == false)
+            if (officialPrivates.TryGetValue(key, out OfficialPrivateState state) == false)
             {
                 state = new OfficialPrivateState { Head = head };
                 officialPrivates[key] = state;
@@ -339,7 +339,7 @@ public partial class QQModule
         }
         lock (officialGate)
         {
-            if (officialGroups.TryGetValue(targetId, out OfficialGroupState? state) == false)
+            if (officialGroups.TryGetValue(targetId, out OfficialGroupState state) == false)
             {
                 return;
             }
@@ -357,7 +357,7 @@ public partial class QQModule
 
     OfficialGroupState GetOfficialGroup(string groupId)
     {
-        if (officialGroups.TryGetValue(groupId, out OfficialGroupState? state) == false)
+        if (officialGroups.TryGetValue(groupId, out OfficialGroupState state) == false)
         {
             state = new OfficialGroupState { GroupId = groupId };
             officialGroups[groupId] = state;

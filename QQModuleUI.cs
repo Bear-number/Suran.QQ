@@ -12,16 +12,16 @@ namespace Suran.QQ;
 /// <summary>
 /// QQ 官方机器人的设置页。
 ///
-/// 版式对齐 EmotionTTS 那一页（gs- 皮肤）：粉色 hero + 左侧色条分区 + 统一控件，
-/// 只是把手写的配置项按「凭据 / 事件 / 收发 / 网络 / 语音 / 运行」重新分了一次组——
-/// 反射自动分组会把 22 项平铺成一张长表，凭据和事件位混在一起很难找。
+/// 版式对齐 EmotionTTS 那一页（gs- 皮肤）：粉色 hero + 左侧色条分区 + 统一控件。
+/// 分区按使用流程排：先凭据、网络、事件（能不能连上收得到），再收信/感官/发送（怎么处理与回），
+/// 然后按钮、群监听、语音条，最后运行与调试；凭据和事件位不再和发送选项混在一张长表里。
 /// </summary>
 public partial class QQModuleUI : ModuleUIBase<QQModule, QQConfig>, IDisposable
 {
-    System.Timers.Timer? listenTimer;
+    System.Timers.Timer listenTimer;
 
     // 官方通道记住下拉框选中的群（group_openid）
-    string? selectedOfficialGroup;
+    string selectedOfficialGroup;
 
     protected override void OnInitialized()
     {
@@ -98,6 +98,11 @@ public partial class QQModuleUI : ModuleUIBase<QQModule, QQConfig>, IDisposable
 
         BuildHero(b, ref i);
 
+        SectionPanel(b, ref i, "群消息接收状态", () =>
+        {
+            AddListenStatus(b, ref i);
+        });
+
         SectionPanel(b, ref i, "凭据与连接", () =>
         {
             AddOfficialConnectionRow(b, ref i);
@@ -117,6 +122,21 @@ public partial class QQModuleUI : ModuleUIBase<QQModule, QQConfig>, IDisposable
             AddInput(b, ref i, "数据目录", Configuration.DataFolder, v => Configuration.DataFolder = v,
                 "相对 Alife Storage，默认 QQOfficial");
             AddHint(b, ref i, "放已见消息 id 台账和各会话的被动回复剩余额度；不存 token 与密钥。");
+        });
+
+        SectionPanel(b, ref i, "网络与重连", () =>
+        {
+            AddInput(b, ref i, "HTTP 代理", Configuration.ProxyUrl, v => Configuration.ProxyUrl = v,
+                "如 http://127.0.0.1:7890，留空直连");
+            AddHint(b, ref i, "api.bot.qq.com 和 wss 网关连不上时，先看这一项。");
+
+            AddNumberInput(b, ref i, "单次请求超时（秒）", Configuration.RequestTimeoutSeconds,
+                v => Configuration.RequestTimeoutSeconds = v, 5, 120);
+            AddHint(b, ref i, "REST 单次请求的超时，默认 20。");
+
+            AddNumberInput(b, ref i, "断线重连间隔（秒）", Configuration.ReconnectSeconds,
+                v => Configuration.ReconnectSeconds = v, 1, 60);
+            AddHint(b, ref i, "心跳间隔由网关下发，这一项只管连不上时的重试节奏，默认 3 秒。");
         });
 
         SectionPanel(b, ref i, "事件订阅", () =>
@@ -142,7 +162,7 @@ public partial class QQModuleUI : ModuleUIBase<QQModule, QQConfig>, IDisposable
             AddHint(b, ref i, "GUILDS 位。只有玩 QQ 频道才需要，默认关。");
         });
 
-        SectionPanel(b, ref i, "收发开关", () =>
+        SectionPanel(b, ref i, "收信与注入", () =>
         {
             AddSwitch(b, ref i, "注入会话", Configuration.InjectInboundMessages,
                 v => Configuration.InjectInboundMessages = v);
@@ -166,14 +186,34 @@ public partial class QQModuleUI : ModuleUIBase<QQModule, QQConfig>, IDisposable
                 v => Configuration.InboundFileMaxChars = v, 0, 20000);
             AddHint(b, ref i, "收到的文本类附件（txt/log/json/md/csv 等）读进上下文的最大字数，默认 4000；0 = 只给链接不读内容。");
 
+            AddSwitch(b, ref i, "注入引用内容", Configuration.InjectQuotedContent,
+                v => Configuration.InjectQuotedContent = v);
+            AddHint(b, ref i, "开：有人引用回复时，把被引用那条的作者与正文（截断 300 字）一起注入。");
+
+            AddNumberInput(b, ref i, "私聊防抖（秒）", Configuration.PrivateDebounceSeconds,
+                v => Configuration.PrivateDebounceSeconds = v, 0, 300);
+            AddHint(b, ref i, "大于 0 时，单个私聊的消息先缓存，停这么久再一起推；0 = 每条立即推。");
+
+            AddNumberInput(b, ref i, "事件去重保留（分钟）", Configuration.DedupTtlMinutes,
+                v => Configuration.DedupTtlMinutes = v, 1, 1440);
+            AddHint(b, ref i, "同一 msg_id 官方可能重复推送，这段时间内见过的 id 直接吞掉，默认 30 分钟。");
+
+            AddNumberInput(b, ref i, "双副本宽限（秒）", Configuration.DoubleCopyGraceSeconds,
+                v => Configuration.DoubleCopyGraceSeconds = v, 0, 5);
+            AddHint(b, ref i, "全量群消息与 @ 副本同时到达时，全量副本等这么久再处理，发现 @ 副本已到就丢弃，默认 0。");
+        });
+
+        SectionPanel(b, ref i, "听觉与视觉", () =>
+        {
             AddSwitch(b, ref i, "语音本地识别", Configuration.InboundSpeechRecognition,
                 v => Configuration.InboundSpeechRecognition = v);
             AddHint(b, ref i, "开：把收到的语音下载下来，交给本机听觉模型（SenseVoice 等）转成文字补进上下文。"
                 + "支持 QQ 的 silk 格式；没装听觉模型或识别失败会自动跳过。默认关。");
 
-            AddSwitch(b, ref i, "图片自动描述", Configuration.InboundImageCaption,
+            AddSwitch(b, ref i, "视觉自动描述", Configuration.InboundImageCaption,
                 v => Configuration.InboundImageCaption = v);
-            AddHint(b, ref i, "开：把收到的图片交给视觉模型描述后写进上下文。每张图都是一次视觉推理（在线模型还计费），默认关。");
+            AddHint(b, ref i, "开：图片额外让视觉模型描述一行（本地模型或在线 API 都行，取决于启用了哪个视觉插件；视频不额外描述）。"
+                + "不管开不开，图片和视频都会带上 URL 与 <AnalyseImage>/<AnalyzeVideo> 提示，模型自己决定要不要看。默认关。");
 
             AddTextArea(b, ref i, "图片描述提示词", Configuration.InboundImagePrompt,
                 v => Configuration.InboundImagePrompt = v, "发给视觉模型的问题，留空用默认");
@@ -182,6 +222,18 @@ public partial class QQModuleUI : ModuleUIBase<QQModule, QQConfig>, IDisposable
             AddNumberInput(b, ref i, "感官结果字数上限", Configuration.InboundSenseMaxChars,
                 v => Configuration.InboundSenseMaxChars = v, 50, 2000);
             AddHint(b, ref i, "本地语音识别文本、图片描述各自写进上下文的最大字数，默认 300。");
+        });
+
+        SectionPanel(b, ref i, "发送与格式", () =>
+        {
+            AddSwitch(b, ref i, "允许发送消息", Configuration.EnableSend,
+                v => Configuration.EnableSend = v);
+            AddHint(b, ref i, "关掉后所有发送类工具不可用，收信与注入不受影响。");
+
+            AddSwitch(b, ref i, "允许主动消息", Configuration.AllowProactiveMessage,
+                v => Configuration.AllowProactiveMessage = v);
+            AddHint(b, ref i, "被动回复有平台窗口（群 5 分钟 5 次、单聊 60 分钟 4 次）；窗口外的主动消息要走这条，且受配额限制。"
+                + "默认关：不在会话里主动插话。");
 
             AddLabeledSelect(b, ref i, Configuration.AtMarkupStyle,
                 v => Configuration.AtMarkupStyle = v, AtStyleOptions);
@@ -195,19 +247,30 @@ public partial class QQModuleUI : ModuleUIBase<QQModule, QQConfig>, IDisposable
                 v => Configuration.MediaConflictPrefer = v, ConflictOptions);
             AddHint(b, ref i, "markdown 与引用只能留一个：默认留 markdown 丢引用；选 reference 时，非必须场景退回纯文本发引用。");
 
-            AddSwitch(b, ref i, "允许发送消息", Configuration.EnableSend,
-                v => Configuration.EnableSend = v);
-            AddHint(b, ref i, "关掉后所有发送类工具不可用，收信与注入不受影响。");
+            AddNumberInput(b, ref i, "输入状态帧数上限", Configuration.TypingMaxFrames,
+                v => Configuration.TypingMaxFrames = v, 0, 20);
+            AddHint(b, ref i, "每个会话一次对话里最多发几帧「正在输入」（msg_type=6 也占被动回复额度），默认 3；0 = 不发。");
 
-            AddSwitch(b, ref i, "允许主动消息", Configuration.AllowProactiveMessage,
-                v => Configuration.AllowProactiveMessage = v);
-            AddHint(b, ref i, "被动回复有平台窗口（群 5 分钟 5 次、单聊 60 分钟 4 次）；窗口外的主动消息要走这条，且受配额限制。"
-                + "默认关：不在会话里主动插话。");
+            AddSubGroup(b, ref i, "输入状态");
+            AddNumberInput(b, ref i, "延时（秒）", Configuration.TypingDelaySeconds,
+                v => Configuration.TypingDelaySeconds = v, 0, 30);
+            AddHint(b, ref i, "收到私聊后隔多久才显示「正在输入」，默认 2 秒；0 = 立刻。");
 
-            AddSwitch(b, ref i, "功能文档常驻", Configuration.DocumentAlwaysResident,
-                v => Configuration.DocumentAlwaysResident = v);
-            AddHint(b, ref i, "开：工具说明常驻系统提示词；关：隐式加载省 token，但模型得先读入口文档。"
-                + "QQ 收发是高频基础能力，默认开。改完要重载插件。");
+            AddNumberInput(b, ref i, "防抖（秒）", Configuration.TypingDebounceSeconds,
+                v => Configuration.TypingDebounceSeconds = v, 0, 120);
+            AddHint(b, ref i, "同一个人刚显示过状态后，这么久内不再重复显示，默认 3 秒；0 = 不防抖。");
+
+            AddSwitch(b, ref i, "主动也显示", Configuration.TypingAllowProactive,
+                v => Configuration.TypingAllowProactive = v);
+            AddHint(b, ref i, "开：没有被动 msg_id 时也发一帧主动状态（占主动额度）。");
+
+            AddLabeledSelect(b, ref i, Configuration.AnimatedImageMode,
+                v => Configuration.AnimatedImageMode = v, AnimatedOptions);
+            AddHint(b, ref i, "GIF/WebP 的发送档位：auto 逐级降级；static 跳过原图；file 原图按文件发（保动画）。");
+
+            AddNumberInput(b, ref i, "素材配额提醒阈值", Configuration.MarkdownImageWarnAt,
+                v => Configuration.MarkdownImageWarnAt = v, 0, 100);
+            AddHint(b, ref i, "markdown 素材达到这个数量就在上传后提醒，平台上限 100，默认 90；0 = 不提醒。");
         });
 
         SectionPanel(b, ref i, "按钮", () =>
@@ -255,9 +318,8 @@ public partial class QQModuleUI : ModuleUIBase<QQModule, QQConfig>, IDisposable
 
         SectionPanel(b, ref i, "群监听（官方通道）", () =>
         {
-            AddListenStatus(b, ref i);
-
-            AddHint(b, ref i, "「群消息·全量注入策略」选「群监听」时生效：唤醒词 / @ / 概率任一命中就开始听这个群，"
+            AddHint(b, ref i, "每个群的实时状态与监听开关在页面顶部「群消息接收状态」里；这里只配监听规则。"
+                + "「群消息·全量注入策略」选「群监听」时生效：唤醒词 / @ / 概率任一命中就开始听这个群，"
                 + "消息先缓存、按间隔成批推送；回复后或长时间没动静自动关闭。");
 
             AddInput(b, ref i, "唤醒词（逗号分隔）", Configuration.GroupWakeWords,
@@ -300,28 +362,9 @@ public partial class QQModuleUI : ModuleUIBase<QQModule, QQConfig>, IDisposable
                 v => Configuration.GroupAutoCloseMinutes = v, 0, 240);
             AddHint(b, ref i, "监听中这么久没再被唤醒/使用就自动退出，默认 4 分钟；0 = 不自动关。");
 
-            AddNumberInput(b, ref i, "私聊防抖（秒）", Configuration.PrivateDebounceSeconds,
-                v => Configuration.PrivateDebounceSeconds = v, 0, 300);
-            AddHint(b, ref i, "大于 0 时，单个私聊的消息先缓存，停这么久再一起推；0 = 每条立即推。");
-
             AddSubGroup(b, ref i, "快速预设");
             AddHint(b, ref i, "两套常用组合，会把「全量注入策略」一并切到「群监听」；改完仍需点下方保存。");
             AddOfficialPresetRow(b, ref i);
-        });
-
-        SectionPanel(b, ref i, "网络与重连", () =>
-        {
-            AddInput(b, ref i, "HTTP 代理", Configuration.ProxyUrl, v => Configuration.ProxyUrl = v,
-                "如 http://127.0.0.1:7890，留空直连");
-            AddHint(b, ref i, "api.bot.qq.com 和 wss 网关连不上时，先看这一项。");
-
-            AddNumberInput(b, ref i, "单次请求超时（秒）", Configuration.RequestTimeoutSeconds,
-                v => Configuration.RequestTimeoutSeconds = v, 5, 120);
-            AddHint(b, ref i, "REST 单次请求的超时，默认 20。");
-
-            AddNumberInput(b, ref i, "断线重连间隔（秒）", Configuration.ReconnectSeconds,
-                v => Configuration.ReconnectSeconds = v, 1, 60);
-            AddHint(b, ref i, "心跳间隔由网关下发，这一项只管连不上时的重试节奏，默认 3 秒。");
         });
 
         SectionPanel(b, ref i, "语音条", () =>
@@ -354,52 +397,20 @@ public partial class QQModuleUI : ModuleUIBase<QQModule, QQConfig>, IDisposable
             AddHint(b, ref i, "转码前截断超过这个长度的音频，默认 300 秒。");
         });
 
-        SectionPanel(b, ref i, "运行细节", () =>
+        SectionPanel(b, ref i, "运行与调试", () =>
         {
-            AddNumberInput(b, ref i, "输入状态帧数上限", Configuration.TypingMaxFrames,
-                v => Configuration.TypingMaxFrames = v, 0, 20);
-            AddHint(b, ref i, "每个会话一次对话里最多发几帧「正在输入」（msg_type=6 也占被动回复额度），默认 3；0 = 不发。");
-
-            AddNumberInput(b, ref i, "事件去重保留（分钟）", Configuration.DedupTtlMinutes,
-                v => Configuration.DedupTtlMinutes = v, 1, 1440);
-            AddHint(b, ref i, "同一 msg_id 官方可能重复推送，这段时间内见过的 id 直接吞掉，默认 30 分钟。");
+            AddSwitch(b, ref i, "功能文档常驻", Configuration.DocumentAlwaysResident,
+                v => Configuration.DocumentAlwaysResident = v);
+            AddHint(b, ref i, "开：工具说明常驻系统提示词；关：隐式加载省 token，但模型得先读入口文档。"
+                + "QQ 收发是高频基础能力，默认开。改完要重载插件。");
 
             AddSwitch(b, ref i, "详细日志", Configuration.DetailLog,
                 v => Configuration.DetailLog = v);
             AddHint(b, ref i, "记录请求与事件的时间、错误码。不会记录 AppSecret 与 access_token。");
 
-            AddSwitch(b, ref i, "注入引用内容", Configuration.InjectQuotedContent,
-                v => Configuration.InjectQuotedContent = v);
-            AddHint(b, ref i, "开：有人引用回复时，把被引用那条的作者与正文（截断 300 字）一起注入。");
-
             AddSwitch(b, ref i, "高风险群管理工具", Configuration.EnableSensitiveTools,
                 v => Configuration.EnableSensitiveTools = v);
             AddHint(b, ref i, "开：允许禁言/全员禁言/踢人/黑名单/加群审批/频道踢人/改频道权限；默认关，调用会直接报错。");
-
-            AddSubGroup(b, ref i, "输入状态");
-            AddNumberInput(b, ref i, "延时（秒）", Configuration.TypingDelaySeconds,
-                v => Configuration.TypingDelaySeconds = v, 0, 30);
-            AddHint(b, ref i, "收到私聊后隔多久才显示「正在输入」，默认 2 秒；0 = 立刻。");
-
-            AddNumberInput(b, ref i, "防抖（秒）", Configuration.TypingDebounceSeconds,
-                v => Configuration.TypingDebounceSeconds = v, 0, 120);
-            AddHint(b, ref i, "同一个人刚显示过状态后，这么久内不再重复显示，默认 3 秒；0 = 不防抖。");
-
-            AddSwitch(b, ref i, "主动也显示", Configuration.TypingAllowProactive,
-                v => Configuration.TypingAllowProactive = v);
-            AddHint(b, ref i, "开：没有被动 msg_id 时也发一帧主动状态（占主动额度）。");
-
-            AddNumberInput(b, ref i, "素材配额提醒阈值", Configuration.MarkdownImageWarnAt,
-                v => Configuration.MarkdownImageWarnAt = v, 0, 100);
-            AddHint(b, ref i, "markdown 素材达到这个数量就在上传后提醒，平台上限 100，默认 90；0 = 不提醒。");
-
-            AddLabeledSelect(b, ref i, Configuration.AnimatedImageMode,
-                v => Configuration.AnimatedImageMode = v, AnimatedOptions);
-            AddHint(b, ref i, "GIF/WebP 的发送档位：auto 逐级降级；static 跳过原图；file 原图按文件发（保动画）。");
-
-            AddNumberInput(b, ref i, "双副本宽限（秒）", Configuration.DoubleCopyGraceSeconds,
-                v => Configuration.DoubleCopyGraceSeconds = v, 0, 5);
-            AddHint(b, ref i, "全量群消息与 @ 副本同时到达时，全量副本等这么久再处理，发现 @ 副本已到就丢弃，默认 0。");
         });
 
         b.CloseElement();
@@ -496,7 +507,7 @@ public partial class QQModuleUI : ModuleUIBase<QQModule, QQConfig>, IDisposable
 
     async void CheckVoiceChain()
     {
-        QQModule? module = ResolveModule();
+        QQModule module = ResolveModule();
         if (module == null)
         {
             voiceCheckResult = "模块实例还没起来";
@@ -522,7 +533,7 @@ public partial class QQModuleUI : ModuleUIBase<QQModule, QQConfig>, IDisposable
     }
 
     /// <summary>宿主没把 Module 传进来时（角色没起/刚重载），退一步从活动容器里找同一个模块实例。</summary>
-    QQModule? ResolveModule()
+    QQModule ResolveModule()
     {
         if (Module != null)
         {
@@ -537,7 +548,7 @@ public partial class QQModuleUI : ModuleUIBase<QQModule, QQConfig>, IDisposable
     /// </summary>
     void AddListenStatus(RenderTreeBuilder b, ref int seq)
     {
-        QQModule? module = ResolveModule();
+        QQModule module = ResolveModule();
         if (module == null)
         {
             AddModuleOffline(b, ref seq);
@@ -562,7 +573,7 @@ public partial class QQModuleUI : ModuleUIBase<QQModule, QQConfig>, IDisposable
     }
 
     void AddListenBlock(RenderTreeBuilder b, ref int seq, int listeningCount, List<ListenRowView> rows,
-        string warn, string emptyHint, bool interactive, string? selectedId, Action<string?> select)
+        string warn, string emptyHint, bool interactive, string selectedId, Action<string> select)
     {
         b.OpenElement(seq++, "div");
         b.AddAttribute(seq++, "class", "gs-listen");
@@ -755,7 +766,7 @@ public partial class QQModuleUI : ModuleUIBase<QQModule, QQConfig>, IDisposable
     /// <summary>官方网关状态（网关按「断线重连间隔」自己重连，这里只显示，不打断它）。</summary>
     void AddOfficialConnectionRow(RenderTreeBuilder b, ref int seq)
     {
-        QQModule? module = ResolveModule();
+        QQModule module = ResolveModule();
         bool ready = module != null && module.IsOfficialGatewayReady;
         string state = module == null ? "模块实例还没起来，读不到网关状态" : module.OfficialGatewayState;
 

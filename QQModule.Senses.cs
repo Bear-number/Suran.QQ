@@ -24,9 +24,9 @@ public partial class QQModule
     const string SpeechModelType = "Alife.Function.Speech.ISpeechModel, Alife.Function.Speech";
 
     /// <summary>按接口全名从角色容器里找现成实例。类型解析不到、模块没启用都返回 null。</summary>
-    async Task<object?> ResolveSenseServiceAsync(string typeName)
+    async Task<object> ResolveSenseServiceAsync(string typeName)
     {
-        Type? type = Type.GetType(typeName, throwOnError: false);
+        Type type = Type.GetType(typeName, throwOnError: false);
         if (type == null)
         {
             return null;
@@ -45,9 +45,9 @@ public partial class QQModule
     /// <summary>用宿主的语音模型把文字合成音频文件；模型没启用就直接告诉调用方不可用。</summary>
     async Task<string> SynthesizeSpeechAsync(string text)
     {
-        object? model = await ResolveSenseServiceAsync(SpeechModelType);
-        Type? modelType = Type.GetType(SpeechModelType, throwOnError: false);
-        MethodInfo? generate = modelType?.GetMethod("GenerateSpeechFileAsync",
+        object model = await ResolveSenseServiceAsync(SpeechModelType);
+        Type modelType = Type.GetType(SpeechModelType, throwOnError: false);
+        MethodInfo generate = modelType?.GetMethod("GenerateSpeechFileAsync",
             [typeof(string), typeof(CancellationToken)]);
         if (model == null || generate == null)
         {
@@ -56,8 +56,8 @@ public partial class QQModule
 
         try
         {
-            object? result = generate.Invoke(model, [text, CancellationToken.None]);
-            string? file = result is Task<string> task ? await task : null;
+            object result = generate.Invoke(model, [text, CancellationToken.None]);
+            string file = result is Task<string> task ? await task : null;
             if (string.IsNullOrWhiteSpace(file))
             {
                 throw new Exception("语音合成失败");
@@ -71,7 +71,7 @@ public partial class QQModule
     }
 
     /// <summary>下载附件到临时文件。不是 http 链接、下载失败、超过限制都返回 null。</summary>
-    async Task<string?> DownloadSenseFileAsync(string url, string extension, long maxBytes)
+    async Task<string> DownloadSenseFileAsync(string url, string extension, long maxBytes)
     {
         if (url.StartsWith("http", StringComparison.OrdinalIgnoreCase) == false)
         {
@@ -110,30 +110,42 @@ public partial class QQModule
         }
     }
 
-    /// <summary>语音转写：AudioDecoder 解码（silk 也认），再喂给宿主听觉模型，收齐分段文本。</summary>
-    async Task<string?> TryHearVoiceAsync(string url)
+    /// <summary>语音转写：下载后交给宿主听觉模型；silk 由 AudioDecoder 负责解码。</summary>
+    async Task<string> TryHearVoiceAsync(string url)
     {
         if (Configuration.InboundSpeechRecognition == false)
         {
             return null;
         }
 
-        object? provider = await ResolveSenseServiceAsync(AudioProviderType);
-        Type? providerType = Type.GetType(AudioProviderType, throwOnError: false);
-        Type? recognizerType = Type.GetType(AudioRecognizerType, throwOnError: false);
-        Type? decoderType = Type.GetType(AudioDecoderType, throwOnError: false);
-        MethodInfo? create = providerType?.GetMethod("CreateAudioRecognizer", Type.EmptyTypes);
-        MethodInfo? decode = decoderType?.GetMethod("DecodeFileTo16kMonoFloat", [typeof(string)]);
-        MethodInfo? accept = recognizerType?.GetMethod("AcceptWaveform", [typeof(float[]), typeof(int)]);
-        MethodInfo? flush = recognizerType?.GetMethod("Flush", Type.EmptyTypes);
-        EventInfo? recognized = recognizerType?.GetEvent("Recognized");
-        if (provider == null || create == null || decode == null || accept == null || flush == null || recognized == null)
+        string path = await DownloadSenseFileAsync(url, ".silk", 20L * 1024 * 1024);
+        if (path == null)
         {
             return null;
         }
+        try
+        {
+            return await TranscribeAudioFileAsync(path);
+        }
+        finally
+        {
+            TryDeleteSenseFile(path);
+        }
+    }
 
-        string? path = await DownloadSenseFileAsync(url, ".silk", 20L * 1024 * 1024);
-        if (path == null)
+    /// <summary>把一个本地音频文件交给宿主听觉模型转写。</summary>
+    async Task<string> TranscribeAudioFileAsync(string path)
+    {
+        object provider = await ResolveSenseServiceAsync(AudioProviderType);
+        Type providerType = Type.GetType(AudioProviderType, throwOnError: false);
+        Type recognizerType = Type.GetType(AudioRecognizerType, throwOnError: false);
+        Type decoderType = Type.GetType(AudioDecoderType, throwOnError: false);
+        MethodInfo create = providerType?.GetMethod("CreateAudioRecognizer", Type.EmptyTypes);
+        MethodInfo decode = decoderType?.GetMethod("DecodeFileTo16kMonoFloat", [typeof(string)]);
+        MethodInfo accept = recognizerType?.GetMethod("AcceptWaveform", [typeof(float[]), typeof(int)]);
+        MethodInfo flush = recognizerType?.GetMethod("Flush", Type.EmptyTypes);
+        EventInfo recognized = recognizerType?.GetEvent("Recognized");
+        if (provider == null || create == null || decode == null || accept == null || flush == null || recognized == null)
         {
             return null;
         }
@@ -147,7 +159,7 @@ public partial class QQModule
                 return null;
             }
 
-            object? recognizer = create.Invoke(provider, null);
+            object recognizer = create.Invoke(provider, null);
             if (recognizer == null)
             {
                 return null;
@@ -183,25 +195,12 @@ public partial class QQModule
             DetailLog("语音本地识别失败：" + Message(ex));
             return null;
         }
-        finally
-        {
-            TryDeleteSenseFile(path);
-        }
     }
 
     /// <summary>图片描述：先下载到临时文件（视觉模型只认本地路径），再问宿主视觉模型。</summary>
-    async Task<string?> TryDescribeImageAsync(string url, string contentType)
+    async Task<string> TryDescribeImageAsync(string url, string contentType)
     {
         if (Configuration.InboundImageCaption == false)
-        {
-            return null;
-        }
-
-        object? model = await ResolveSenseServiceAsync(VisionInterfaceType);
-        Type? modelType = Type.GetType(VisionInterfaceType, throwOnError: false);
-        MethodInfo? query = modelType?.GetMethod("QueryAsync",
-            [typeof(string), typeof(string), typeof(int), typeof(CancellationToken)]);
-        if (model == null || query == null)
         {
             return null;
         }
@@ -209,8 +208,30 @@ public partial class QQModule
         string extension = contentType.Contains("png", StringComparison.OrdinalIgnoreCase) ? ".png"
             : contentType.Contains("gif", StringComparison.OrdinalIgnoreCase) ? ".gif"
             : ".jpg";
-        string? path = await DownloadSenseFileAsync(url, extension, 20L * 1024 * 1024);
+        string path = await DownloadSenseFileAsync(url, extension, 20L * 1024 * 1024);
         if (path == null)
+        {
+            return null;
+        }
+
+        try
+        {
+            return await DescribeImageFileAsync(path);
+        }
+        finally
+        {
+            TryDeleteSenseFile(path);
+        }
+    }
+
+    /// <summary>把一个本地图片文件交给宿主视觉模型描述。</summary>
+    async Task<string> DescribeImageFileAsync(string path)
+    {
+        object model = await ResolveSenseServiceAsync(VisionInterfaceType);
+        Type modelType = Type.GetType(VisionInterfaceType, throwOnError: false);
+        MethodInfo query = modelType?.GetMethod("QueryAsync",
+            [typeof(string), typeof(string), typeof(int), typeof(CancellationToken)]);
+        if (model == null || query == null)
         {
             return null;
         }
@@ -224,7 +245,7 @@ public partial class QQModule
             }
 
             string text = "";
-            object? result = query.Invoke(model, [path, prompt, 256, DestroyCancellationToken]);
+            object result = query.Invoke(model, [path, prompt, 256, DestroyCancellationToken]);
             if (result is Task<string> task)
             {
                 text = ((await task) ?? "").Trim();
@@ -245,10 +266,6 @@ public partial class QQModule
         {
             DetailLog("图片视觉描述失败：" + Message(ex));
             return null;
-        }
-        finally
-        {
-            TryDeleteSenseFile(path);
         }
     }
 
@@ -271,6 +288,7 @@ public partial class QQModule
         {
             File.Delete(path);
         }
+        // [静默] 文件不存在或不可读时跳过
         catch
         {
         }

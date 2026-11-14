@@ -40,12 +40,12 @@ public partial class QQModule(
     const int passiveReplyPrivateTimes = 4;
 
     // 传输层跨热重载共用一份：网关连接、token、以及「该会话最近一条可被动回复的消息」
-    static QQAccessToken? accessToken;
-    static QQRestClient? rest;
-    static QQGatewayClient? gateway;
+    static QQAccessToken accessToken;
+    static QQRestClient rest;
+    static QQGatewayClient gateway;
     static string botOpenId = "";
     static string botResolveError = "";
-    QQIdentityStore? identities;
+    QQIdentityStore identities;
     DateTime lastIdentitySaved = DateTime.MinValue;
     static string gatewayStateText = "还没起连接";
     static readonly Dictionary<string, string> lastInboundMessageId = new();
@@ -62,6 +62,12 @@ public partial class QQModule(
 
     /// <summary>官方网关是否已经握手完成、可以收事件了。</summary>
     public bool IsOfficialGatewayReady => gateway is { IsReady: true };
+
+    /// <summary>最近一次收到官方消息的会话 ID（group_openid / user_openid），供其它插件反射读取，把本地文件发回同一会话。</summary>
+    public string LastConversationTarget { get; private set; } = "";
+
+    /// <summary>最近一次会话是不是群聊。</summary>
+    public bool LastConversationIsGroup { get; private set; } = true;
 
     protected override Task OnAwake()
     {
@@ -305,6 +311,11 @@ public partial class QQModule(
         {
             lastInboundMessageId[ConversationKey(isGroup, targetId)] = messageId;
         }
+        if (targetId.Length > 0)
+        {
+            LastConversationTarget = targetId;
+            LastConversationIsGroup = isGroup;
+        }
         string body = QQJson.Text(data, "content");
         if (QQJson.Integer(data, "message_type") == 3)
         {
@@ -343,13 +354,13 @@ public partial class QQModule(
             ProbeMemberName(targetId, senderId);
         }
         string groupName = isGroup && identities != null ? identities.GroupName(targetId) : "";
-        string attachments = await DescribeAttachmentsAsync(data);
+        string attachmentText = await DescribeAttachmentsAsync(data);
         string quoted = Configuration.InjectQuotedContent ? DescribeQuoted(data) : "";
         string speaker = "[" + senderId + "(" + display + ")]";
         string head = isGroup
             ? "[QQ官方群聊消息(" + targetId + (groupName.Length > 0 ? "," + groupName : "") + ")]"
             : "[QQ官方私聊消息(" + targetId + ")]";
-        string line = speaker + ":" + body + quoted + attachments;
+        string line = speaker + ":" + body + quoted + attachmentText;
 
         // 是否立刻注入、丢弃还是进缓存，交给「群监听 / 缓存防抖」那一层决定
         bool mentioned = IsMentioned(data);
@@ -507,7 +518,7 @@ public partial class QQModule(
         ".ini", ".toml", ".cs", ".py", ".js", ".ts", ".html", ".css", ".sql", ".bat", ".ps1", ".sh"
     ];
 
-    /// <summary>附件说明：图片/语音/视频给链接；开了本地感官就再补语音转写与图片描述；文本类文件按配置读入上下文。</summary>
+    /// <summary>附件说明：图片/视频给链接并提示模型可自行看图；开了本地感官就再补语音转写、图片/视频描述；文本类文件按配置读入上下文。</summary>
     async Task<string> DescribeAttachmentsAsync(JsonElement data)
     {
         List<string> lines = new();
@@ -524,8 +535,16 @@ public partial class QQModule(
             };
             string url = QQJson.Text(item, "url");
             string fileName = QQJson.Text(item, "filename");
+            bool isImage = contentType.StartsWith("image/", StringComparison.OrdinalIgnoreCase);
+            bool isVideo = contentType.StartsWith("video/", StringComparison.OrdinalIgnoreCase);
             lines.Add("\n[附件:" + label + "] " + url
-                + (QQJson.Text(item, "asr_refer_text").Length > 0 ? "（平台ASR文本：" + QQJson.Text(item, "asr_refer_text") + "）" : ""));
+                + (QQJson.Text(item, "asr_refer_text").Length > 0 ? "（平台ASR文本：" + QQJson.Text(item, "asr_refer_text") + "）" : "")
+                + (isImage && url.StartsWith("http", StringComparison.OrdinalIgnoreCase)
+                    ? "\n　　（要看图就调 <AnalyseImage pathOrUrl=\"" + url + "\" prompt=\"简述这张图\"/>）"
+                    : "")
+                + (isVideo && url.StartsWith("http", StringComparison.OrdinalIgnoreCase)
+                    ? "\n　　（要看视频就调 <AnalyzeVideo url=\"" + url + "\" question=\"总结这个视频\"/>，后台分析完会推送结果）"
+                    : ""));
 
             if (contentType == "voice")
             {
@@ -535,7 +554,7 @@ public partial class QQModule(
                     lines.Add("\n[语音内容（本地识别）]" + heard);
                 }
             }
-            else if (contentType.StartsWith("image/", StringComparison.OrdinalIgnoreCase))
+            else if (isImage)
             {
                 string? seen = await TryDescribeImageAsync(url, contentType);
                 if (seen != null)
@@ -591,7 +610,7 @@ public partial class QQModule(
     }
 
     /// <summary>文本类附件下载并截断。非文本、超大、取不到都返回 null（不影响正常注入）。</summary>
-    async Task<string?> TryReadRemoteTextAsync(string url, string fileName, string contentType)
+    async Task<string> TryReadRemoteTextAsync(string url, string fileName, string contentType)
     {
         int maxChars = Configuration.InboundFileMaxChars;
         if (maxChars <= 0 || url.StartsWith("http", StringComparison.OrdinalIgnoreCase) == false)
@@ -726,7 +745,7 @@ public partial class QQModule(
 
     static string ReadEntry(ZipArchive archive, string name)
     {
-        ZipArchiveEntry? entry = archive.GetEntry(name);
+        ZipArchiveEntry entry = archive.GetEntry(name);
         if (entry == null)
         {
             return "";
@@ -819,7 +838,7 @@ public partial class QQModule(
 
     async Task<JsonElement> SendMessageAsync(bool isGroup, string targetId, JsonObject payload, string operation)
     {
-        string messageId = payload.TryGetPropertyValue("msg_id", out JsonNode? replyTo) ? replyTo?.GetValue<string>() ?? "" : "";
+        string messageId = payload.TryGetPropertyValue("msg_id", out JsonNode replyTo) ? replyTo?.GetValue<string>() ?? "" : "";
         int limitSeconds = isGroup ? passiveReplyGroupSeconds : passiveReplyPrivateSeconds;
         int limitTimes = isGroup ? passiveReplyGroupTimes : passiveReplyPrivateTimes;
         if (messageId.Length == 0 && Configuration.AllowProactiveMessage == false)
@@ -944,7 +963,7 @@ public partial class QQModule(
         else if (keyboardJson.Trim().Length > 0)
         {
             // 按钮只能挂在 markdown 上：正文原样当 markdown，再把按钮补进去
-            KeyboardPlan? plan = BuildKeyboard(keyboardJson.Trim(), out string keyboardProblem);
+            KeyboardPlan plan = BuildKeyboard(keyboardJson.Trim(), out string keyboardProblem);
             if (plan == null)
             {
                 interactor.Poke("[QQ官方机器人] 按钮结构不合法，这条没发出去：" + keyboardProblem);
@@ -996,7 +1015,7 @@ public partial class QQModule(
         }
         int limitSeconds = isGroup ? passiveReplyGroupSeconds : passiveReplyPrivateSeconds;
         int limitTimes = isGroup ? passiveReplyGroupTimes : passiveReplyPrivateTimes;
-        if (lastInboundMessageId.TryGetValue(conversationKey, out string? messageId) && messageId.Length > 0
+        if (lastInboundMessageId.TryGetValue(conversationKey, out string messageId) && messageId.Length > 0
             && ReplyBudgetExceeded(messageId, limitSeconds, limitTimes) == false)
         {
             payload["msg_id"] = messageId;
@@ -1014,7 +1033,7 @@ public partial class QQModule(
         }
         if (id.Equals("last", StringComparison.OrdinalIgnoreCase) || id is "最近" or "上一条" or "刚刚")
         {
-            return lastInboundMessageId.TryGetValue(ConversationKey(isGroup, targetId.Trim()), out string? cached) ? cached : "";
+            return lastInboundMessageId.TryGetValue(ConversationKey(isGroup, targetId.Trim()), out string cached) ? cached : "";
         }
         return id;
     }
@@ -1100,7 +1119,7 @@ public partial class QQModule(
             }
             else if (keyboardJson.Trim().Length > 0)
             {
-                KeyboardPlan? plan = BuildKeyboard(keyboardJson.Trim(), out string keyboardProblem);
+                KeyboardPlan plan = BuildKeyboard(keyboardJson.Trim(), out string keyboardProblem);
                 if (plan == null)
                 {
                     throw new Exception("键盘结构不合法：" + keyboardProblem);
@@ -1119,7 +1138,7 @@ public partial class QQModule(
             payload["message_reference"] = new JsonObject { ["message_id"] = quoteMessageId.Trim() };
         }
         string key = ConversationKey(isGroup, targetId.Trim());
-        if (lastInboundMessageId.TryGetValue(key, out string? recent) && recent.Length > 0)
+        if (lastInboundMessageId.TryGetValue(key, out string recent) && recent.Length > 0)
         {
             payload["msg_id"] = recent;
         }
@@ -1175,7 +1194,7 @@ public partial class QQModule(
         {
             throw new Exception("配置里「开关·发送消息」是关的");
         }
-        JsonNode? parsed = JsonNode.Parse(kvJson.Trim());
+        JsonNode parsed = JsonNode.Parse(kvJson.Trim());
         JsonObject payload = new()
         {
             ["msg_type"] = 3,
@@ -1184,7 +1203,7 @@ public partial class QQModule(
         };
         string target = targetId.Trim();
         string key = ConversationKey(isGroup, target);
-        if (lastInboundMessageId.TryGetValue(key, out string? recent) && recent.Length > 0)
+        if (lastInboundMessageId.TryGetValue(key, out string recent) && recent.Length > 0)
         {
             payload["msg_id"] = recent;
         }
@@ -1207,7 +1226,7 @@ public partial class QQModule(
         {
             return "kvJson 要是一个数组";
         }
-        foreach (JsonNode? raw in kv)
+        foreach (JsonNode raw in kv)
         {
             if (raw is not JsonObject entry)
             {
@@ -1261,7 +1280,7 @@ public partial class QQModule(
             ["media"] = new JsonObject { ["file_info"] = fileInfo }
         };
         string key = ConversationKey(isGroup, target);
-        if (lastInboundMessageId.TryGetValue(key, out string? recent) && recent.Length > 0)
+        if (lastInboundMessageId.TryGetValue(key, out string recent) && recent.Length > 0)
         {
             payload["msg_id"] = recent;
         }
@@ -1395,7 +1414,7 @@ public partial class QQModule(
             throw new Exception(targetError);
         }
         string id = (messageId ?? "").Trim();
-        if (id.Length == 0 && lastBotMessageId.TryGetValue(ConversationKey(isGroup, targetId.Trim()), out string? remembered))
+        if (id.Length == 0 && lastBotMessageId.TryGetValue(ConversationKey(isGroup, targetId.Trim()), out string remembered))
         {
             id = remembered;
         }
@@ -1411,7 +1430,7 @@ public partial class QQModule(
     [Description("回应一次按钮回调（type 11/12）。平台侧其实要求 3 秒内回，插件收到就先替它回了，这个工具只在自动回执失败时用")]
     public async Task QQAnswerInteraction(string interactionId, int code = 0)
     {
-        if (pendingInteractions.TryGetValue(interactionId.Trim(), out string? type) == false)
+        if (pendingInteractions.TryGetValue(interactionId.Trim(), out string type) == false)
         {
             throw new Exception("没在这批事件里见过 interaction_id " + interactionId.Trim() + "；官方规定同一个 id 只能回应一次，多半已经自动回了");
         }

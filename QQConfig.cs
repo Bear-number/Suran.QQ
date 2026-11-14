@@ -206,8 +206,9 @@ public class QQConfig
     [Description("开：把收到的语音下载下来，交给本机听觉模型（SenseVoice 等）转成文字补进上下文。没装听觉模型时自动跳过，默认关")]
     public bool InboundSpeechRecognition { get; set; } = false;
 
-    [DisplayName("收信·图片自动描述")]
-    [Description("开：把收到的图片交给视觉模型描述后写进上下文。每张图都是一次视觉推理（在线模型还计费），默认关")]
+    [DisplayName("收信·视觉自动描述")]
+    [Description("开：收到的图片额外让视觉模型描述一行写进上下文（本地模型或在线 API 都行，取决于启用的是哪个视觉插件）；关：不加。"
+        + "图片和视频始终都会带上 URL 与 <AnalyseImage>/<AnalyzeVideo> 调用提示，由模型自己决定要不要看。默认关")]
     public bool InboundImageCaption { get; set; } = false;
 
     [DisplayName("收信·图片描述提示词")]
