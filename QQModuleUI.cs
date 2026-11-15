@@ -410,7 +410,7 @@ public partial class QQModuleUI : ModuleUIBase<QQModule, QQConfig>, IDisposable
 
             AddSwitch(b, ref i, "高风险群管理工具", Configuration.EnableSensitiveTools,
                 v => Configuration.EnableSensitiveTools = v);
-            AddHint(b, ref i, "开：允许禁言/全员禁言/踢人/黑名单/加群审批/频道踢人/改频道权限；默认关，调用会直接报错。");
+            AddHint(b, ref i, "开：允许踢人 / 拉黑 / 频道踢人 / 改频道权限；默认关，调用会直接报错。单人禁言、加群审批和只读查询不受影响。");
         });
 
         b.CloseElement();

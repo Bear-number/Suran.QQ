@@ -31,7 +31,9 @@ public partial class QQModule
     const int keyboardMaxColumns = 5;
     const int keyboardDataMaxChars = 100;
 
-    /// <summary>高风险群管理工具的总开关：默认关，调用直接报错，避免模型手滑踢人/禁言。</summary>
+    /// <summary>高风险群管理工具的总开关：默认关，调用直接报错。
+    /// 只拦"会造成不可逆后果"的：踢人、拉黑、频道踢人、改频道权限；
+    /// 单人禁言（可随时解除）、加群审批、只读查询都不算，不受这个开关影响。</summary>
     void RequireSensitiveTools()
     {
         if (Configuration.EnableSensitiveTools == false)
@@ -101,7 +103,6 @@ public partial class QQModule
         + "只能操作普通成员（群主、管理员、机器人会被拒）；minutes 最长 30 天；60 QPM")]
     public async Task QQGroupMuteMembers(string groupOpenid, string memberOpenids, int minutes = 60, string op = "add")
     {
-        RequireSensitiveTools();
         string action = op.Trim().ToLowerInvariant();
         if (action is not ("add" or "update" or "del"))
         {
@@ -134,7 +135,6 @@ public partial class QQModule
     [Description("查群禁言设置：全员禁言模式（none/always/schedule）与当前正在禁言的成员。30 QPM")]
     public async Task QQGroupMuteSetting(string groupOpenid)
     {
-        RequireSensitiveTools();
         JsonElement body = await RequireRest().GetAsync(groupsPath + Uri.EscapeDataString(Need(groupOpenid, "groupOpenid")) + "/restrict_chat_setting", DestroyCancellationToken);
         string mode = "none";
         if (body.TryGetProperty("global_rule", out JsonElement global) && global.ValueKind == JsonValueKind.Object)
@@ -185,7 +185,6 @@ public partial class QQModule
     [Description("审批一条入群申请：approve 通过、decline 拒绝（可带拒绝理由、可同时拉黑）。机器人得是群管理员。60 QPM")]
     public async Task QQGroupApproveJoinRequest(string groupOpenid, string memberOpenid, string joinRequestId, bool approve = true, string rejectReason = "", bool addToBlacklist = false)
     {
-        RequireSensitiveTools();
         string op = approve ? "approve" : "decline";
         JsonObject payload = new() { ["op"] = op };
         if (joinRequestId.Trim().Length > 0)

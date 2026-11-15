@@ -264,6 +264,6 @@ public class QQConfig
     public bool InjectQuotedContent { get; set; } = true;
 
     [DisplayName("工具·高风险群管理")]
-    [Description("开：允许禁言/全员禁言/踢人/黑名单/加群审批/频道踢人/改频道权限这些高风险工具；默认关，调用会直接报错")]
+    [Description("开：允许踢人 / 拉黑 / 频道踢人 / 改频道权限；默认关，调用会直接报错。单人禁言（可随时解除）、加群审批和只读查询不受这个开关影响")]
     public bool EnableSensitiveTools { get; set; }
 }
