@@ -15,10 +15,13 @@ namespace Suran.QQ;
 public partial class QQModule
 {
     static readonly TimeSpan ProbeInterval = TimeSpan.FromMinutes(10);
+    const int memberProbeMaxEntries = 5000;
     readonly Dictionary<string, DateTime> groupNameProbeAt = new();
     readonly Dictionary<string, DateTime> memberNameProbeAt = new();
     readonly HashSet<string> probingGroupName = new();
     readonly HashSet<string> probingMemberName = new();
+    // 探测跑在后台任务里，多个成员同时补名会并发读写上面这几张表
+    readonly object probeGate = new();
 
     /// <summary>群名为空时，后台拉一次群信息。</summary>
     void ProbeGroupName(string groupId)
@@ -27,15 +30,18 @@ public partial class QQModule
         {
             return;
         }
-        if (groupNameProbeAt.TryGetValue(groupId, out DateTime last) && DateTime.UtcNow - last < ProbeInterval)
+        lock (probeGate)
         {
-            return;
+            if (groupNameProbeAt.TryGetValue(groupId, out DateTime last) && DateTime.UtcNow - last < ProbeInterval)
+            {
+                return;
+            }
+            if (probingGroupName.Add(groupId) == false)
+            {
+                return;
+            }
+            groupNameProbeAt[groupId] = DateTime.UtcNow;
         }
-        if (probingGroupName.Add(groupId) == false)
-        {
-            return;
-        }
-        groupNameProbeAt[groupId] = DateTime.UtcNow;
 
         _ = Task.Run(async () =>
         {
@@ -56,7 +62,10 @@ public partial class QQModule
             }
             finally
             {
-                probingGroupName.Remove(groupId);
+                lock (probeGate)
+                {
+                    probingGroupName.Remove(groupId);
+                }
             }
         });
     }
@@ -69,15 +78,19 @@ public partial class QQModule
             return;
         }
         string key = groupId + "|" + memberId;
-        if (memberNameProbeAt.TryGetValue(key, out DateTime last) && DateTime.UtcNow - last < ProbeInterval)
+        lock (probeGate)
         {
-            return;
+            if (memberNameProbeAt.TryGetValue(key, out DateTime last) && DateTime.UtcNow - last < ProbeInterval)
+            {
+                return;
+            }
+            if (probingMemberName.Add(key) == false)
+            {
+                return;
+            }
+            memberNameProbeAt[key] = DateTime.UtcNow;
+            PruneMemberProbeMap();
         }
-        if (probingMemberName.Add(key) == false)
-        {
-            return;
-        }
-        memberNameProbeAt[key] = DateTime.UtcNow;
 
         _ = Task.Run(async () =>
         {
@@ -99,8 +112,33 @@ public partial class QQModule
             }
             finally
             {
-                probingMemberName.Remove(key);
+                lock (probeGate)
+                {
+                    probingMemberName.Remove(key);
+                }
             }
         });
+    }
+
+    /// <summary>成员探测记录按会话数增长，超过上限就把过期的清掉。调用方持锁。</summary>
+    void PruneMemberProbeMap()
+    {
+        if (memberNameProbeAt.Count <= memberProbeMaxEntries)
+        {
+            return;
+        }
+        DateTime limit = DateTime.UtcNow - ProbeInterval;
+        List<string> stale = new();
+        foreach (KeyValuePair<string, DateTime> pair in memberNameProbeAt)
+        {
+            if (pair.Value < limit)
+            {
+                stale.Add(pair.Key);
+            }
+        }
+        foreach (string key in stale)
+        {
+            memberNameProbeAt.Remove(key);
+        }
     }
 }

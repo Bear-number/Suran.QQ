@@ -70,19 +70,46 @@ public partial class QQModule
         }
     }
 
-    /// <summary>下载附件到临时文件。不是 http 链接、下载失败、超过限制都返回 null。</summary>
+    /// <summary>附件下载用的共享 client：收图/收语音是高频动作，每回新建要重做一次 TLS 握手。</summary>
+    static readonly HttpClient senseDownloadClient = new() { Timeout = TimeSpan.FromSeconds(30) };
+
+    /// <summary>只允许 https 的公网域名下载。挡掉明文、回环、私网与 IP 字面量，
+    /// 免得消息里塞一个内网链接就把插件引去探测。</summary>
+    static bool IsDownloadableUrl(string url)
+    {
+        if (Uri.TryCreate(url, UriKind.Absolute, out Uri uri) == false)
+        {
+            return false;
+        }
+        if (uri.Scheme != Uri.UriSchemeHttps)
+        {
+            return false;
+        }
+        string host = uri.Host;
+        if (host.Length == 0 || System.Net.IPAddress.TryParse(host, out _))
+        {
+            return false;
+        }
+        return host.Equals("localhost", StringComparison.OrdinalIgnoreCase) == false
+            && host.EndsWith(".localhost", StringComparison.OrdinalIgnoreCase) == false
+            && host.EndsWith(".local", StringComparison.OrdinalIgnoreCase) == false
+            && host.EndsWith(".internal", StringComparison.OrdinalIgnoreCase) == false
+            && host.EndsWith(".lan", StringComparison.OrdinalIgnoreCase) == false;
+    }
+
+    /// <summary>下载附件到临时文件。不是可下载链接、下载失败、超过限制都返回 null。</summary>
     async Task<string> DownloadSenseFileAsync(string url, string extension, long maxBytes)
     {
-        if (url.StartsWith("http", StringComparison.OrdinalIgnoreCase) == false)
+        if (IsDownloadableUrl(url) == false)
         {
+            DetailLog("感官附件地址不合规（只收 https 公网域名），跳过：" + QQRestClient.Shorten(url));
             return null;
         }
 
         string path = Path.Combine(Path.GetTempPath(), $"qqofficial_sense_{Guid.NewGuid():N}{extension}");
         try
         {
-            using HttpClient client = new() { Timeout = TimeSpan.FromSeconds(30) };
-            using HttpResponseMessage response = await client.GetAsync(url, DestroyCancellationToken);
+            using HttpResponseMessage response = await senseDownloadClient.GetAsync(url, DestroyCancellationToken);
             if (response.IsSuccessStatusCode == false)
             {
                 DetailLog("感官附件下载失败：" + (int)response.StatusCode);

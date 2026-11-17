@@ -42,6 +42,82 @@ public partial class QQModule
         }
     }
 
+    /// <summary>敏感操作的身份核对：总开关 + 发起人校验。
+    /// 白名单非空只认名单里的人；白名单为空时按群成员角色判断，群主/管理员才放行。
+    /// 频道场景没有群成员角色可查，必须配白名单。</summary>
+    async Task RequireSensitiveCallerAsync(string groupOpenId)
+    {
+        RequireSensitiveTools();
+
+        string senderId;
+        string speakerGroupId;
+        bool speakerIsGroup;
+        DateTime speakerAt;
+        lock (speakerGate)
+        {
+            senderId = lastSpeakerId;
+            speakerGroupId = lastSpeakerGroupId;
+            speakerIsGroup = lastSpeakerIsGroup;
+            speakerAt = lastSpeakerAtUtc;
+        }
+        if (senderId.Length == 0 || DateTime.UtcNow - speakerAt > TimeSpan.FromMinutes(3))
+        {
+            throw new Exception("没有可核对的发起人：敏感操作必须在收到消息后 3 分钟内发起，"
+                + "否则无法确认是谁要求的");
+        }
+        // 跨会话也要拦：拿 A 群里的发言人身份去批 B 群的踢人，等于没校验
+        string target = groupOpenId.Trim();
+        if (speakerIsGroup && target.Length > 0 && string.Equals(speakerGroupId, target, StringComparison.Ordinal) == false)
+        {
+            throw new Exception("发起人 " + senderId + " 最近一条消息不在群 " + target + " 里，"
+                + "敏感操作只认本群内的请求");
+        }
+
+        List<string> allowList = SplitIds(Configuration.SensitiveToolAllowList);
+        if (allowList.Count > 0)
+        {
+            if (allowList.Contains(senderId, StringComparer.Ordinal) == false)
+            {
+                throw new Exception("发起人 " + senderId + " 不在「工具·敏感操作白名单」里，拒绝执行。"
+                    + "要放行请把这个 openid 填进配置");
+            }
+            DetailLog("敏感操作放行（白名单）：" + senderId + " → " + target);
+            return;
+        }
+
+        if (speakerIsGroup == false || target.Length == 0)
+        {
+            throw new Exception("白名单为空，私聊里无法核对发起人是否群管理员。"
+                + "要执行请先在「工具·敏感操作白名单」里填上允许操作的 openid");
+        }
+        string role = await TryResolveGroupRoleAsync(target, senderId);
+        if (role == "owner" || role == "admin")
+        {
+            DetailLog("敏感操作放行（群角色 " + role + "）：" + senderId + " → " + target);
+            return;
+        }
+        throw new Exception("发起人 " + senderId + " 在本群的角色是 "
+            + (role.Length > 0 ? role : "未知（查成员接口不可用，可能需要内邀权限）")
+            + "，敏感操作只允许群主和管理员。要固定放行某些人，请把 openid 填进「工具·敏感操作白名单」");
+    }
+
+    /// <summary>查群成员角色。接口不可用（内邀未开通）或出错时返回空串。</summary>
+    async Task<string> TryResolveGroupRoleAsync(string groupOpenId, string memberOpenId)
+    {
+        try
+        {
+            JsonElement member = await RequireRest().GetAsync(
+                groupsPath + Uri.EscapeDataString(groupOpenId) + "/members/" + Uri.EscapeDataString(memberOpenId),
+                DestroyCancellationToken);
+            return QQJson.Text(member, "member_role");
+        }
+        catch (Exception ex)
+        {
+            DetailLog("查发起人群角色失败：" + Message(ex));
+            return "";
+        }
+    }
+
     [XmlFunction(FunctionMode.OneShot)]
     [Description("查群基本信息（群名、简介、分类、标签、成员数）。30 QPM，白名单能力，没权限回 11253 会原样报出")]
     public async Task QQGroupInfo(string groupOpenid)
@@ -208,7 +284,7 @@ public partial class QQModule
     [Description("批量移除群成员，单次最多 20 人，可同时加入黑名单。文档标着「内邀接入中」，没权限会回 11253 并原样报出。30 QPM")]
     public async Task QQGroupRemoveMembers(string groupOpenid, string memberOpenids, bool addToBlacklist = false)
     {
-        RequireSensitiveTools();
+        await RequireSensitiveCallerAsync(groupOpenid);
         List<string> members = SplitIds(memberOpenids);
         if (members.Count == 0)
         {

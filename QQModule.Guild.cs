@@ -99,7 +99,7 @@ public partial class QQModule
     [Description("把成员踢出频道；addBlacklist=true 会顺手拉黑，不清记录就只是移除。50 QPS")]
     public async Task QQGuildKickMember(string guildId, string userId, bool addBlacklist = false)
     {
-        RequireSensitiveTools();
+        await RequireSensitiveCallerAsync("");
         string json = await InvokeAsync("DELETE",
             "/guilds/" + Uri.EscapeDataString(Need(guildId, "guildId"))
             + "/members/" + Uri.EscapeDataString(Need(userId, "userId"))
@@ -211,7 +211,7 @@ public partial class QQModule
     public async Task QQUpdateChannelPermission(string channelId, string targetId,
         string addPermissions = "", string removePermissions = "")
     {
-        RequireSensitiveTools();
+        await RequireSensitiveCallerAsync("");
         JsonObject payload = new();
         if (addPermissions.Trim().Length > 0)
         {

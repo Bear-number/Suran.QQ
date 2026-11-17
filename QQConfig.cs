@@ -266,4 +266,11 @@ public class QQConfig
     [DisplayName("工具·高风险群管理")]
     [Description("开：允许踢人 / 拉黑 / 频道踢人 / 改频道权限；默认关，调用会直接报错。单人禁言（可随时解除）、加群审批和只读查询不受这个开关影响")]
     public bool EnableSensitiveTools { get; set; }
+
+    [DisplayName("工具·敏感操作白名单")]
+    [Description("允许触发踢人、拉黑、改频道权限的用户 openid，逗号或换行分隔。留空时只有群主和管理员能触发；频道操作没有角色可查，留空会直接拒绝")]
+    public string SensitiveToolAllowList { get; set; } = "";
+
+    /// <summary>工作台草稿用：字段全是值类型/字符串，浅拷贝即可。</summary>
+    internal QQConfig Copy() => (QQConfig)MemberwiseClone();
 }

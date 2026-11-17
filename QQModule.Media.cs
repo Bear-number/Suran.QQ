@@ -263,17 +263,18 @@ public partial class QQModule
     /// 路径参数名平台写的是 group_id/user_id，但描述明确「群 OpenID/用户 OpenID」，所以传的就是 openid</summary>
     async Task<string> UploadInChunksAsync(bool isGroup, string openid, int fileType, FileInfo file)
     {
-        byte[] bytes = File.ReadAllBytes(file.FullName);
-        string headHash = HashHex(MD5.Create(), bytes.Take((int)Math.Min(md5HeadBytes, bytes.Length)).ToArray());
+        // 按片读盘：上限 200MB，整读会把峰值内存抬到两百多兆，hash 也顺带走一次流式
+        long fileLength = file.Length;
+        (string md5, string sha1, string headHash) hashes = await HashFileAsync(file, md5HeadBytes);
         string preparePath = (isGroup ? groupsPath : usersPath) + Uri.EscapeDataString(openid) + mediaPreparePath;
         JsonObject prepare = new()
         {
             ["file_type"] = fileType,
-            ["file_size"] = bytes.Length.ToString(CultureInfo.InvariantCulture),
+            ["file_size"] = fileLength.ToString(CultureInfo.InvariantCulture),
             ["file_name"] = file.Name,
-            ["md5"] = HashHex(MD5.Create(), bytes),
-            ["sha1"] = HashHex(SHA1.Create(), bytes),
-            ["md5_10m"] = headHash
+            ["md5"] = hashes.md5,
+            ["sha1"] = hashes.sha1,
+            ["md5_10m"] = hashes.headHash
         };
         // 语音条不能带文件名，带了会掉成文件卡片（和小文件分支同一规则）
         if (fileType == 3)
@@ -289,6 +290,8 @@ public partial class QQModule
             throw new Exception("预上传没给 upload_id 或分片列表：" + QQRestClient.Shorten(prepared.ToString()));
         }
         string finishPath = (isGroup ? groupsPath : usersPath) + Uri.EscapeDataString(openid) + mediaPartFinishPath;
+        using FileStream source = new(file.FullName, FileMode.Open, FileAccess.Read, FileShare.Read, 81920,
+            FileOptions.Asynchronous | FileOptions.SequentialScan);
         foreach (JsonElement part in parts)
         {
             int index = (int)QQJson.Integer(part, "index");
@@ -297,13 +300,15 @@ public partial class QQModule
             {
                 throw new Exception("分片 " + index.ToString(CultureInfo.InvariantCulture) + " 没有预签名 URL");
             }
-            int start = index * (int)blockSize;
-            int length = Math.Min((int)blockSize, bytes.Length - start);
+            long start = index * blockSize;
+            int length = (int)Math.Min(blockSize, fileLength - start);
             if (length <= 0)
             {
                 continue;
             }
-            byte[] chunk = bytes.Skip(start).Take(length).ToArray();
+            byte[] chunk = new byte[length];
+            source.Position = start;
+            await ReadChunkAsync(source, chunk, DestroyCancellationToken);
             string etag = await PutToPresignedAsync(presigned, chunk, "application/octet-stream");
             await RequireRest().PostAsync(finishPath, new JsonObject
             {
@@ -323,6 +328,47 @@ public partial class QQModule
         return RequireFileInfo(merged);
     }
 
+    /// <summary>一次遍历同时算出整体 MD5、SHA1 和头部 MD5，避免把整个文件读进内存。</summary>
+    static async Task<(string Md5, string Sha1, string Head)> HashFileAsync(FileInfo file, long headBytes)
+    {
+        using IncrementalHash md5 = IncrementalHash.CreateHash(HashAlgorithmName.MD5);
+        using IncrementalHash sha1 = IncrementalHash.CreateHash(HashAlgorithmName.SHA1);
+        using IncrementalHash head = IncrementalHash.CreateHash(HashAlgorithmName.MD5);
+        using FileStream stream = new(file.FullName, FileMode.Open, FileAccess.Read, FileShare.Read, 81920,
+            FileOptions.Asynchronous | FileOptions.SequentialScan);
+        byte[] buffer = new byte[81920];
+        long total = 0;
+        int read;
+        while ((read = await stream.ReadAsync(buffer, 0, buffer.Length)) > 0)
+        {
+            md5.AppendData(buffer, 0, read);
+            sha1.AppendData(buffer, 0, read);
+            if (total < headBytes)
+            {
+                head.AppendData(buffer, 0, (int)Math.Min(read, headBytes - total));
+            }
+            total += read;
+        }
+        return (ToHex(md5.GetHashAndReset()), ToHex(sha1.GetHashAndReset()), ToHex(head.GetHashAndReset()));
+    }
+
+    static string ToHex(byte[] hash) => Convert.ToHexString(hash).ToLowerInvariant();
+
+    static async Task ReadChunkAsync(FileStream stream, byte[] buffer, CancellationToken cancelToken)
+    {
+        int offset = 0;
+        while (offset < buffer.Length)
+        {
+            int read = await stream.ReadAsync(buffer.AsMemory(offset, buffer.Length - offset), cancelToken);
+            if (read <= 0)
+            {
+                throw new Exception("读文件不完整：期望 " + buffer.Length.ToString(CultureInfo.InvariantCulture)
+                    + " 字节，只读到 " + offset.ToString(CultureInfo.InvariantCulture));
+            }
+            offset += read;
+        }
+    }
+
     static string RequireFileInfo(JsonElement uploaded)
     {
         string fileInfo = QQJson.Text(uploaded, "file_info");
@@ -333,14 +379,16 @@ public partial class QQModule
         return fileInfo;
     }
 
+    /// <summary>直传 COS 用的共享 client：每片新建一个连接池，几十片下来全是重复握手。</summary>
+    static readonly HttpClient uploadClient = new() { Timeout = TimeSpan.FromMinutes(5) };
+
     /// <summary>直传 COS：Content-Type 必须与申请时声明的一致，否则 COS 回 403；返回头里的 ETag（去引号）就是下一步要的 MD5</summary>
-    static async Task<string> PutToPresignedAsync(string presignedUrl, byte[] payload, string contentType)
+    async Task<string> PutToPresignedAsync(string presignedUrl, byte[] payload, string contentType)
     {
-        using HttpClient client = new();
         using ByteArrayContent content = new(payload);
         content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue(contentType);
         using HttpRequestMessage request = new(HttpMethod.Put, presignedUrl) { Content = content };
-        using HttpResponseMessage response = await client.SendAsync(request);
+        using HttpResponseMessage response = await uploadClient.SendAsync(request, DestroyCancellationToken);
         if (response.IsSuccessStatusCode == false)
         {
             throw new Exception("分片直传失败 HTTP " + (int)response.StatusCode + "（Content-Type 与申请时不一致会被 COS 拒 403）");
@@ -664,6 +712,28 @@ public partial class QQModule
 
     static readonly Dictionary<string, DateTime> rejectedImageOriginals = new(StringComparer.OrdinalIgnoreCase);
 
+    /// <summary>被拒记录只用来 10 分钟内不重试，攒到一定量就把过期的清掉。</summary>
+    static void PruneRejectedOriginals()
+    {
+        if (rejectedImageOriginals.Count <= 200)
+        {
+            return;
+        }
+        DateTime limit = DateTime.UtcNow.AddMinutes(-30);
+        List<string> stale = new();
+        foreach (KeyValuePair<string, DateTime> pair in rejectedImageOriginals)
+        {
+            if (pair.Value < limit)
+            {
+                stale.Add(pair.Key);
+            }
+        }
+        foreach (string key in stale)
+        {
+            rejectedImageOriginals.Remove(key);
+        }
+    }
+
     static bool IsAnimatedImage(string path) =>
         path.EndsWith(".gif", StringComparison.OrdinalIgnoreCase) || path.EndsWith(".webp", StringComparison.OrdinalIgnoreCase);
 
@@ -705,6 +775,7 @@ public partial class QQModule
                 catch (Exception ex)
                 {
                     rejectedImageOriginals[stamp] = DateTime.UtcNow;
+                    PruneRejectedOriginals();
                     DetailLog("动图原图发送失败，转 APNG/PNG 再试：" + ex.Message);
                 }
             }
@@ -845,8 +916,24 @@ public partial class QQModule
         };
         process.Start();
         using CancellationTokenSource timeout = new(TimeSpan.FromSeconds(120));
-        string error = await process.StandardError.ReadToEndAsync(timeout.Token);
-        await process.WaitForExitAsync(timeout.Token);
-        return (process.ExitCode, error);
+        try
+        {
+            string error = await process.StandardError.ReadToEndAsync(timeout.Token);
+            await process.WaitForExitAsync(timeout.Token);
+            return (process.ExitCode, error);
+        }
+        catch (OperationCanceledException)
+        {
+            // 只取消等待不杀进程，卡住的转码会一直占着 CPU
+            try
+            {
+                process.Kill(entireProcessTree: true);
+            }
+            // [静默] 进程可能已经自己退出，杀不掉不用管
+            catch
+            {
+            }
+            throw new Exception("外部工具 " + Path.GetFileName(program) + " 超过 120 秒没结束，已强制结束");
+        }
     }
 }
