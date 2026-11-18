@@ -95,12 +95,16 @@ public partial class QQModule(
         - 主动发文本 → `<QQSendText>`；图片/视频/文件 → `<QQSendMedia>`；语音条 → `<QQSendVoice>`（自动 TTS，不用自己找音频）
         - 带按钮 → `<QQSendButton>`，或给上面两个传 `keyboardJson`，简化写法 `[{"label":"选项A","data":"a"}]`
         - 撤自己刚发的 → `<QQRecall>`，messageId 留空撤最近一条，平台只给 2 分钟
-        - 单聊要打字机效果 → `<QQStreamText>`；先给对方「正在输入」→ `<QQTypingNotify>`
-        - 要在群里 @ 某人 → 先 `<QQFindPerson keyword="昵称"/>` 拿 openid，不能只写名字
+        - 群里 @ 某人 → 先 `<QQFindPerson keyword="昵称"/>` 拿 openid，再 `<QQSendText atOpenids="..." />`；光写名字 @ 不到，编的 openid 会被拒。@ 会自动转 markdown，这时候引用发不出去
         - 群管理：禁言 `<QQGroupMuteMembers>`；入群审批 `<QQGroupJoinRequests>` 查、`<QQGroupApproveJoinRequest>` 批
-        - 连不上、收不到事件 → 先跑 `<QQEnv/>` 自检
+        - 单聊要边说边显示 → `<QQStreamText>`：第一段不传 streamMsgId，之后每段带上一次返回的 id，最后 `inputState="10"` 收尾；普通回复别用它，还是 `<QQSend>`
+        - 先给对方「正在输入」→ `<QQTypingNotify>`，它也占被动回复额度（默认最多 3 帧，别连发）
+        - 连不上、收不到事件、主动发被拒 → 先跑 `<QQEnv/>` 自检；问「这机器人能不能主动推」用 `<QQGroupBotState>`
         - 格式：纯文本最稳；要按钮或 markdown 才切，带上按钮或 markdown 就会丢掉引用
         - 群聊里点指令按钮只会把 @机器人 data 填进输入框，要用户自己按发送；这时先用 `<QQSendText>` 说明一句
+
+        额度：被动回复群 5 分钟 5 次、单聊 60 分钟 4 次，超了平台报 40034128。到上限就别硬发，等对方再开口，或者攒成一条说。
+        收信：图片/语音/视频只给链接，语音自带平台转好的文字（开了本地感官还有识别结果），文本类文件已经读进上下文——都别再去调视觉/听觉服务重复处理同一份附件。
 
         频道、入群审批策略、指令面板、快捷菜单、markdown 素材、ark、未封装的原始 API 等完整用法，输出 `<QQModule/>` 读文档。
         """;
