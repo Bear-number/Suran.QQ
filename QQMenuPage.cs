@@ -205,6 +205,7 @@ public sealed class QQMenuPage : CharacterMenu, IDisposable
             {
                 case "connection":
                     fields.Connection(b, ref i, draft);
+                    fields.Owner(b, ref i, draft);
                     fields.Network(b, ref i, draft);
                     fields.Advanced(b, ref i, draft);
                     break;

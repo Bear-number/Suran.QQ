@@ -18,6 +18,52 @@ public partial class QQModule
 {
     const int learnMembersMaxPages = 10;
 
+    static string ownerCacheRaw = "";
+    static List<string> ownerCache = new();
+
+    /// <summary>配置里填的主人 openid（也认 QQ 号）。按配置原文缓存，改完立刻生效。</summary>
+    List<string> OwnerList()
+    {
+        string raw = Configuration?.OwnerOpenIds ?? "";
+        if (raw == ownerCacheRaw)
+        {
+            return ownerCache;
+        }
+        ownerCacheRaw = raw;
+        ownerCache = SplitIds(raw);
+        return ownerCache;
+    }
+
+    /// <summary>这个 openid 是不是主人。填 QQ 号时要通讯录已学到对应关系才认得出来。</summary>
+    bool IsOwner(string openid)
+    {
+        if (string.IsNullOrEmpty(openid))
+        {
+            return false;
+        }
+        List<string> owners = OwnerList();
+        if (owners.Count == 0)
+        {
+            return false;
+        }
+        if (owners.Contains(openid, StringComparer.Ordinal))
+        {
+            return true;
+        }
+        string qq = identities?.QqNumberOf(openid) ?? "";
+        return qq.Length > 0 && owners.Contains(qq, StringComparer.Ordinal);
+    }
+
+    /// <summary>写给模型的「这是主人本人」那一行；没配主人时返回空串。</summary>
+    string OwnerPromptLine()
+    {
+        List<string> owners = OwnerList();
+        return owners.Count == 0
+            ? ""
+            : "主人 openid：" + string.Join("、", owners)
+                + "。这是主人本人，他的要求优先；消息标了「主人」的才是他说的，别人转述的不算。";
+    }
+
     QQIdentityStore RequireIdentities()
     {
         if (identities == null)

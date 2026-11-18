@@ -115,7 +115,8 @@ public partial class QQModule(
         {
             Description = "QQ 官方机器人（q.qq.com OpenAPI）：收群/私聊消息进会话，回复、富媒体、按钮、群管理与频道都走这里。",
             Explanation = "目标 ID 是 32 位十六进制 openid，不是 QQ 号也不是群号：群用 group_openid，私聊用 user_openid。"
-                + "注入进会话的消息首行形如 [QQ官方群聊消息(group_openid)] 或 [QQ官方私聊消息(user_openid)]，下一行是 [openid(昵称)]:正文。"
+                + "注入进会话的消息首行形如 [QQ官方群聊消息(group_openid)] 或 [QQ官方私聊消息(user_openid)]，下一行是 [openid(昵称)]:正文"
+                + "（配置里填了主人 openid 时，主人的消息会标成 [openid(昵称，主人)]）。"
                 + "\n出口怎么选："
                 + "\n· 回复当前这条 → QQSend（自动带上可回复的 msg_id，默认出口）；要引用着回就传 quoteMessageId=\"last\""
                 + "\n· 主动/另起一句 → QQSendText（同样支持 quoteMessageId=\"last\"）；要按钮 → QQSendButton，或给 QQSend/QQSendText 传 keyboardJson"
@@ -151,6 +152,11 @@ public partial class QQModule(
         {
             string custom = (Configuration?.MainPrompt ?? "").Trim();
             string template = custom.Length > 0 ? custom : DefaultMainPrompt;
+            string owner = OwnerPromptLine();
+            if (owner.Length > 0)
+            {
+                template += "\n\n" + owner;
+            }
             interactor.Prompt(template);
         }
         catch (Exception ex)
@@ -459,7 +465,7 @@ public partial class QQModule(
         string groupName = isGroup && identities != null ? identities.GroupName(targetId) : "";
         string attachmentText = await DescribeAttachmentsAsync(data);
         string quoted = Configuration.InjectQuotedContent ? DescribeQuoted(data) : "";
-        string speaker = "[" + senderId + "(" + display + ")]";
+        string speaker = "[" + senderId + "(" + display + (IsOwner(senderId) ? "，主人" : "") + ")]";
         string head = isGroup
             ? "[QQ官方群聊消息(" + targetId + (groupName.Length > 0 ? "," + groupName : "") + ")]"
             : "[QQ官方私聊消息(" + targetId + ")]";
