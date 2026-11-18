@@ -24,6 +24,7 @@ namespace Suran.QQ;
 [Module("QQ 接入",
     "接 QQ 官方开放平台 OpenAPI（q.qq.com 那套）：自己取 access_token、连 WebSocket 网关收事件，把群/私聊消息按会话形状注入 Alife。回信与富媒体、群管理、频道接口、按钮回调都在这里",
     defaultCategory: "苏染的工具/QQ与群管理",
+    launchOrder: -100,
     EditorUI = typeof(QQModuleUI))]
 public partial class QQModule(
     XmlFunctionCaller functionCaller,
