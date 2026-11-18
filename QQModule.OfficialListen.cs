@@ -194,6 +194,7 @@ public partial class QQModule
             if (mode == "all")
             {
                 interactor.Chat(head + "\n" + line + OfficialGroupSuffix);
+                systemEventService?.ResetTimer();
                 return;
             }
 
@@ -206,6 +207,7 @@ public partial class QQModule
                     return;
                 }
                 interactor.Chat(head + "\n" + line + OfficialGroupSuffix);
+                systemEventService?.ResetTimer();
                 return;
             }
 
@@ -263,6 +265,7 @@ public partial class QQModule
         if (debounce == 0)
         {
             interactor.Chat(head + "\n" + line + OfficialPrivateSuffix);
+            systemEventService?.ResetTimer();
             return;
         }
 
@@ -326,6 +329,7 @@ public partial class QQModule
                 state.Buffer.Clear();
                 state.LastFlush = now;
                 interactor.Chat(text.ToString().TrimEnd() + OfficialPrivateSuffix);
+                systemEventService?.ResetTimer();
             }
         }
     }
@@ -394,6 +398,7 @@ public partial class QQModule
         state.LastUse = DateTime.Now;
 
         interactor.Chat(text.ToString().TrimEnd() + OfficialGroupSuffix);
+        systemEventService?.ResetTimer();
 
         if (Configuration.GroupCloseAfterReply)
         {

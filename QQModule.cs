@@ -14,6 +14,8 @@ using System.Threading;
 using System.Threading.Tasks;
 using Alife.Foundation;
 using Alife.Function.FunctionCaller;
+using Alife.Function.Speech;
+using Alife.Function.SystemEvent;
 using Alife.Framework;
 using Microsoft.Extensions.Logging;
 
@@ -26,7 +28,9 @@ namespace Suran.QQ;
 public partial class QQModule(
     XmlFunctionCaller functionCaller,
     ILogger<QQModule> logger,
-    Interactor<QQModule> interactor
+    Interactor<QQModule> interactor,
+    ISystemEventService? systemEventService = null,
+    ISpeechModel? speechModel = null
 ) : ChatBehaviour, IConfigurable<QQConfig>
 {
     public QQConfig Configuration { get; set; } = null!;

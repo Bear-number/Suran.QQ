@@ -21,7 +21,6 @@ public partial class QQModule
     const string AudioProviderType = "Alife.Function.Auditory.IAudioRecognizerProvider, Alife.Function.Auditory";
     const string AudioRecognizerType = "Alife.Function.Auditory.IAudioRecognizer, Alife.Function.Auditory";
     const string AudioDecoderType = "Alife.Function.Auditory.AudioDecoder, Alife.Function.Auditory";
-    const string SpeechModelType = "Alife.Function.Speech.ISpeechModel, Alife.Function.Speech";
 
     /// <summary>按接口全名从角色容器里找现成实例。类型解析不到、模块没启用都返回 null。</summary>
     async Task<object> ResolveSenseServiceAsync(string typeName)
@@ -45,29 +44,16 @@ public partial class QQModule
     /// <summary>用宿主的语音模型把文字合成音频文件；模型没启用就直接告诉调用方不可用。</summary>
     async Task<string> SynthesizeSpeechAsync(string text)
     {
-        object model = await ResolveSenseServiceAsync(SpeechModelType);
-        Type modelType = Type.GetType(SpeechModelType, throwOnError: false);
-        MethodInfo generate = modelType?.GetMethod("GenerateSpeechFileAsync",
-            [typeof(string), typeof(CancellationToken)]);
-        if (model == null || generate == null)
+        if (speechModel == null)
         {
             throw new Exception("当前语音合成不可用：宿主没注入语音模型");
         }
-
-        try
+        string? file = await speechModel.GenerateSpeechFileAsync(text);
+        if (string.IsNullOrWhiteSpace(file))
         {
-            object result = generate.Invoke(model, [text, CancellationToken.None]);
-            string file = result is Task<string> task ? await task : null;
-            if (string.IsNullOrWhiteSpace(file))
-            {
-                throw new Exception("语音合成失败");
-            }
-            return file!;
+            throw new Exception("语音合成失败");
         }
-        catch (TargetInvocationException ex) when (ex.InnerException != null)
-        {
-            throw new Exception("语音合成失败：" + ex.InnerException.Message, ex.InnerException);
-        }
+        return file!;
     }
 
     /// <summary>附件下载用的共享 client：收图/收语音是高频动作，每回新建要重做一次 TLS 握手。</summary>
