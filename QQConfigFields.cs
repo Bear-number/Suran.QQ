@@ -18,14 +18,19 @@ internal sealed class QQConfigFields
 {
     readonly ComponentBase owner;
     readonly Action changed;
+    readonly Func<QQModule?>? module;
 
-    public QQConfigFields(ComponentBase owner, Action changed)
+    public QQConfigFields(ComponentBase owner, Action changed, Func<QQModule?>? module = null)
     {
         this.owner = owner;
         this.changed = changed;
+        this.module = module;
     }
 
     void Refresh() => changed?.Invoke();
+
+    /// <summary>「查看提示词」是否展开。渲染器实例跟着页面走，翻页签不会丢。</summary>
+    bool showPrompt;
 
     static readonly List<(string Value, string Label, bool Enabled)> GroupModeOptions = new()
     {
@@ -379,8 +384,45 @@ internal sealed class QQConfigFields
         Panel(b, ref i, "运行与调试", () =>
         {
             Switch(b, ref i, "功能文档常驻", cfg.DocumentAlwaysResident, v => cfg.DocumentAlwaysResident = v);
-            Hint(b, ref i, "开：工具说明常驻系统提示词；关：隐式加载省 token，但模型得先读入口文档。"
-                + "QQ 收发是高频基础能力，默认开。改完要重载插件。");
+            Hint(b, ref i, "关（默认）：完整文档不常驻，模型输出 <QQModule/> 才注入，省 token；"
+                + "开：完整文档常驻系统提示词，模型随时看得到全部工具。改完要重载插件。");
+
+            TextArea(b, ref i, "常用功能提示词", cfg.MainPrompt, v => cfg.MainPrompt = v,
+                "留空用默认模板：发消息、媒体、语音、按钮、撤回、找人、群管理");
+            Hint(b, ref i, "注入主 LLM 系统提示词，只写常用出口；完整文档仍走隐式加载。模板里可以直接写 <QQSend> 这类标签说明。");
+            ActionButton(b, ref i, "填入默认模板", () =>
+            {
+                cfg.MainPrompt = QQModule.DefaultMainPrompt;
+                Refresh();
+            });
+            ActionButton(b, ref i, "恢复默认提示词", () =>
+            {
+                cfg.MainPrompt = "";
+                Refresh();
+            });
+            ActionButton(b, ref i, showPrompt ? "收起提示词" : "查看提示词", () =>
+            {
+                showPrompt = !showPrompt;
+                Refresh();
+            });
+            ActionButton(b, ref i, "重新注入", () => module?.Invoke()?.RefreshPrompt());
+            Hint(b, ref i, "「填入默认模板」把内置内容放进输入框，方便看着改；「恢复默认提示词」清空即回到内置模板。"
+                + "改完保存后点「重新注入」立即生效，不用重载插件。");
+
+            if (showPrompt)
+            {
+                string custom = (cfg.MainPrompt ?? "").Trim();
+                Hint(b, ref i, custom.Length > 0
+                    ? "下面是当前填写的模板，保存并点「重新注入」后生效："
+                    : "输入框为空，下面是实际生效的内置默认模板：");
+                b.OpenElement(i++, "pre");
+                b.AddAttribute(i++, "style",
+                    "margin:8px 0 0;padding:10px 12px;border-radius:10px;border:1px solid #f7d6e6;"
+                    + "background:#fffafd;color:#3d2a33;font:12px/1.7 ui-monospace,Consolas,'Cascadia Mono',monospace;"
+                    + "white-space:pre-wrap;word-break:break-word;max-height:320px;overflow:auto;");
+                b.AddContent(i++, custom.Length > 0 ? custom : QQModule.DefaultMainPrompt);
+                b.CloseElement();
+            }
 
             Switch(b, ref i, "详细日志", cfg.DetailLog, v => cfg.DetailLog = v);
             Hint(b, ref i, "记录请求与事件的时间、错误码。不会记录 AppSecret 与 access_token。");

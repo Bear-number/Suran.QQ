@@ -5,8 +5,12 @@ namespace Suran.QQ;
 public class QQConfig
 {
     [DisplayName("运行·功能文档常驻")]
-    [Description("开：功能说明常驻系统提示词，模型随时看得到工具；关：隐式加载省 token，但模型要先读入口文档。QQ 收发是高频基础能力，默认开")]
-    public bool DocumentAlwaysResident { get; set; } = true;
+    [Description("关（默认）：完整文档不常驻，模型输出 <QQModule/> 才注入，省 token；开：完整文档常驻系统提示词")]
+    public bool DocumentAlwaysResident { get; set; } = false;
+
+    [DisplayName("运行·常用功能提示词")]
+    [Description("注入主 LLM 系统提示词的常用出口说明（发消息、发媒体、语音条、撤回、格式要点），留空用默认模板")]
+    public string MainPrompt { get; set; } = "";
 
     [DisplayName("凭据·AppID")]
     [Description("QQ 开放平台机器人的 AppID（q.qq.com 后台「开发管理」里那串数字 ID）。只进本地配置，插件不会把它打进日志或回显")]

@@ -21,7 +21,7 @@ public partial class QQModuleUI : ModuleUIBase<QQModule, QQConfig>
 
     protected override void OnInitialized()
     {
-        fields = new QQConfigFields(this, () => StateHasChanged());
+        fields = new QQConfigFields(this, () => StateHasChanged(), ResolveModule);
     }
 
     protected override void BuildRenderTree(RenderTreeBuilder b)

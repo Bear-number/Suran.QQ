@@ -42,7 +42,7 @@ public sealed class QQMenuPage : CharacterMenu, IDisposable
 
     protected override void OnInitialized()
     {
-        fields = new QQConfigFields(this, () => StateHasChanged());
+        fields = new QQConfigFields(this, () => StateHasChanged(), ResolveModule);
 
         // 群监听的倒计时/缓存条数要实时变，1 秒刷一次
         timer = new System.Timers.Timer(1000);

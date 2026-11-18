@@ -84,6 +84,27 @@ public partial class QQModule(
     /// <summary>最近一次会话是不是群聊。</summary>
     public bool LastConversationIsGroup { get; private set; } = true;
 
+    /// <summary>常用功能提示词的默认模板：只写最常用的出口，完整档留在隐式文档里。</summary>
+    public static readonly string DefaultMainPrompt = """
+        ## QQ 官方机器人（常用出口）
+
+        目标 ID 是 32 位十六进制 openid，不是 QQ 号也不是群号：群用 `group_openid`，私聊用 `user_openid`，来源消息首行会带。
+
+        - 回复当前这条 → `<QQSend>`：自动带上可回复的 msg_id，默认出口
+        - 引用回复（带引用气泡）→ `<QQSend>` 或 `<QQSendText>` 上加 `quoteMessageId="last"`，引用本会话刚收到的那条；也可填真实 message id
+        - 主动发文本 → `<QQSendText>`；图片/视频/文件 → `<QQSendMedia>`；语音条 → `<QQSendVoice>`（自动 TTS，不用自己找音频）
+        - 带按钮 → `<QQSendButton>`，或给上面两个传 `keyboardJson`，简化写法 `[{"label":"选项A","data":"a"}]`
+        - 撤自己刚发的 → `<QQRecall>`，messageId 留空撤最近一条，平台只给 2 分钟
+        - 单聊要打字机效果 → `<QQStreamText>`；先给对方「正在输入」→ `<QQTypingNotify>`
+        - 要在群里 @ 某人 → 先 `<QQFindPerson keyword="昵称"/>` 拿 openid，不能只写名字
+        - 群管理：禁言 `<QQGroupMuteMembers>`；入群审批 `<QQGroupJoinRequests>` 查、`<QQGroupApproveJoinRequest>` 批
+        - 连不上、收不到事件 → 先跑 `<QQEnv/>` 自检
+        - 格式：纯文本最稳；要按钮或 markdown 才切，带上按钮或 markdown 就会丢掉引用
+        - 群聊里点指令按钮只会把 @机器人 data 填进输入框，要用户自己按发送；这时先用 `<QQSendText>` 说明一句
+
+        频道、入群审批策略、指令面板、快捷菜单、markdown 素材、ark、未封装的原始 API 等完整用法，输出 `<QQModule/>` 读文档。
+        """;
+
     protected override Task OnAwake()
     {
         XmlHandler handler = new(this)
@@ -107,12 +128,31 @@ public partial class QQModule(
                 + "撤回只能撤机器人自己的、且 2 分钟内；qqo-xxx 显示态 id 不能直接拿去撤。"
                 + "\n没封装成工具的端点（频道 ark、群文件、部分白名单能力）用 QQApi：method + 文档相对 path + JSON body。连不上、收不到事件先跑 QQEnv。"
         };
-        // 默认 Explicit：文档直接进「当前可用功能」，不再留 <name/> 入口等模型自己去翻；配置里可关掉改走隐式。
+        // 默认 Implicit：完整文档不常驻，模型输出 <QQModule/> 时才注入；配置里可改成常驻。
         functionCaller.RegisterHandler(handler,
-            (Configuration?.DocumentAlwaysResident ?? true) ? DocumentMode.Explicit : DocumentMode.Implicit,
+            (Configuration?.DocumentAlwaysResident ?? false) ? DocumentMode.Explicit : DocumentMode.Implicit,
             cancellationToken: DestroyCancellationToken);
 
+        InjectCommonPrompt();
         return Task.CompletedTask;
+    }
+
+    /// <summary>设置页保存后手动重新注入一次（改了常用功能模板时提示词会过期）。</summary>
+    public void RefreshPrompt() => InjectCommonPrompt();
+
+    /// <summary>把常用出口的简短用法注入主 LLM 系统提示词（配置里的模板优先，留空用内置默认）。</summary>
+    void InjectCommonPrompt()
+    {
+        try
+        {
+            string custom = (Configuration?.MainPrompt ?? "").Trim();
+            string template = custom.Length > 0 ? custom : DefaultMainPrompt;
+            interactor.Prompt(template);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "[QQOfficial] 注入常用功能提示词失败");
+        }
     }
 
     /// <summary>连接与通讯录都放在 OnStart 起，不放 OnAwake：那时平台还没把 Configuration 注进来，读 AppId 会拿到 null（宿主所有插件都是这个时机）</summary>
