@@ -107,6 +107,7 @@ public partial class QQModule(
         收信：图片/语音/视频只给链接，语音自带平台转好的文字（开了本地感官还有识别结果），文本类文件已经读进上下文——都别再去调视觉/听觉服务重复处理同一份附件。
 
         频道、入群审批策略、指令面板、快捷菜单、markdown 素材、ark、未封装的原始 API 等完整用法，输出 `<QQModule/>` 读文档。
+        报参数缺失、标签不存在，也是先输出 `<QQModule/>` 看准签名再重试。
         """;
 
     protected override Task OnAwake()
@@ -133,10 +134,15 @@ public partial class QQModule(
                 + "撤回只能撤机器人自己的、且 2 分钟内；qqo-xxx 显示态 id 不能直接拿去撤。"
                 + "\n没封装成工具的端点（频道 ark、群文件、部分白名单能力）用 QQApi：method + 文档相对 path + JSON body。连不上、收不到事件先跑 QQEnv。"
         };
-        // 默认 Implicit：完整文档不常驻，模型输出 <QQModule/> 时才注入；配置里可改成常驻。
+        // 默认关 = 文档不常驻：只登记函数，模型输出 <QQModule/> 时才把整份文档给它；打开就是文档常驻。
+        bool resident = Configuration?.DocumentAlwaysResident ?? false;
         functionCaller.RegisterHandler(handler,
-            (Configuration?.DocumentAlwaysResident ?? false) ? DocumentMode.Explicit : DocumentMode.Implicit,
+            resident ? DocumentMode.Explicit : DocumentMode.None,
             cancellationToken: DestroyCancellationToken);
+        if (!resident)
+        {
+            DocumentEntry.Attach(functionCaller, handler, text => interactor.Poke(text), DestroyCancellationToken);
+        }
 
         InjectCommonPrompt();
         return Task.CompletedTask;
