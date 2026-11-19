@@ -17,7 +17,7 @@
 
 ## 安装
 
-先装依赖：`Alife.Function.FunctionCaller`。
+先装依赖：`Alife.Function.FunctionCaller`、`Alife.Function.Speech`、`Alife.Function.SystemEvent`。
 
 装法二选一：插件市场里搜 `Suran.QQ`；或把目录放到 `Storage/Plugins/Suran.QQ/`，重启角色生效。
 
@@ -27,7 +27,9 @@
 
 | 设置项 | 键 | 说明 | 默认 |
 | --- | --- | --- | --- |
-| 运行·功能文档常驻 | `DocumentAlwaysResident` | 开：功能说明常驻系统提示词，模型随时看得到工具；关：隐式加载省 token，但模型要先读入口文档。QQ 收发是高频基础能力，默认开 | `true` |
+| 运行·功能文档常驻 | `DocumentAlwaysResident` | 关（默认）：完整文档不常驻，模型输出 <QQModule/> 才注入，省 token；开：完整文档常驻系统提示词 | `false` |
+| 运行·常用功能提示词 | `MainPrompt` | 注入主 LLM 系统提示词的常用出口说明（发消息、发媒体、语音条、撤回、格式要点），留空用默认模板 | `""` |
+| 主人·openid | `OwnerOpenIds` | 主人本人的 openid，多个用逗号或换行分隔；也认已学到的 QQ 号。填了之后：主人的消息在注入时标「主人」，敏感操作对主人直接放行 | `""` |
 | 凭据·AppID | `AppId` | QQ 开放平台机器人的 AppID（q.qq.com 后台「开发管理」里那串数字 ID）。只进本地配置，插件不会把它打进日志或回显 | `""` |
 | 凭据·AppSecret | `AppSecret` | 与 AppID 配对的机器人密钥。 | `""` |
 | 接口·API 根地址 | `ApiBaseUrl` | API 根地址，留空用默认值。 | `""` |
@@ -92,4 +94,4 @@
 | 按钮·账本持久化 | `ButtonLedgerPersist` | 开：按钮限次账本落盘，重启后「每人一次/限次」仍然生效，默认开 | `true` |
 | 收信·注入引用内容 | `InjectQuotedContent` | 开：有人引用回复时，把被引用那条的作者与正文一起注入（截断 300 字），默认开 | `true` |
 | 工具·高风险群管理 | `EnableSensitiveTools` | 开：允许踢人 / 拉黑 / 频道踢人 / 改频道权限；默认关，调用会直接报错。单人禁言（可随时解除）、加群审批和只读查询不受这个开关影响 | `—` |
-| 工具·敏感操作白名单 | `SensitiveToolAllowList` | 允许触发踢人、拉黑、改频道权限的用户 openid，逗号或换行分隔。留空时只有群主和管理员能触发；频道操作没有角色可查，留空会直接拒绝 | `""` |
+| 工具·敏感操作白名单 | `SensitiveToolAllowList` | 允许触发踢人、拉黑、改频道权限的用户 openid，逗号或换行分隔。留空时只有群主和管理员能触发；「主人·openid」里的人不受这个名单限制；频道操作没有角色可查，留空会直接拒绝 | `""` |
