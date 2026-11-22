@@ -79,7 +79,7 @@
 | 按钮·用户提示文案 | `ButtonLimitNotifyText` | 上面那项打开后发给用户的固定文案 | `"这个按钮已经用过啦"` |
 | 收信·读取文件内容上限(字) | `InboundFileMaxChars` | 收到的文本类附件（txt/log/json/md/csv 等）读进上下文的最大字数，默认 4000；0 = 不读 | `4000` |
 | 收信·语音本地识别 | `InboundSpeechRecognition` | 开：把收到的语音下载下来，交给本机听觉模型（SenseVoice 等）转成文字补进上下文。没装听觉模型时自动跳过，默认关 | `false` |
-| 收信·视觉自动描述 | `InboundImageCaption` |  | `false` |
+| 收信·视觉自动描述 | `InboundImageCaption` | 开：收到的图片额外让视觉模型描述一行写进上下文（本地模型或在线 API 都行，取决于启用的是哪个视觉插件）；关：不加。图片和视频始终都会带上 URL 与 <AnalyseImage>/<AnalyzeVideo> 调用提示，由模型自己决定要不要看。默认关 | `false` |
 | 收信·图片描述提示词 | `InboundImagePrompt` | 发给视觉模型的问题，留空用默认的精简描述 | `""` |
 | 收信·感官结果字数上限 | `InboundSenseMaxChars` | 本地语音识别文本、图片描述写进上下文时各自最多保留多少字，默认 300 | `300` |
 | 输入状态·延时(秒) | `TypingDelaySeconds` | 收到私聊后隔多久才显示「正在输入」，默认 2 秒；0 = 立刻 | `2` |
