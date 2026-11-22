@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text;
 using System.Text.Json;
 using System.Threading.Tasks;
 using Alife.Framework;
@@ -33,7 +34,7 @@ public sealed class QQMenuPage : CharacterMenu, IDisposable
     QQConfig baseline;
     QQConfigFields fields;
     string notice = "";
-    string selectedGroup = "";
+    string expandedGroup = "";
     string voiceResult = "";
     bool voiceChecking;
 
@@ -309,7 +310,10 @@ public sealed class QQMenuPage : CharacterMenu, IDisposable
         QQModule module = ResolveModule();
         if (module == null)
         {
-            AddModuleOffline(b, ref seq);
+            b.OpenElement(seq++, "div");
+            b.AddAttribute(seq++, "class", "gs-hint2");
+            b.AddContent(seq++, "模块实例还没起来（角色未加载或插件刚重载），群状态暂时读不到。");
+            b.CloseElement();
             return;
         }
 
@@ -334,13 +338,14 @@ public sealed class QQMenuPage : CharacterMenu, IDisposable
         string warn, string emptyHint, bool interactive)
     {
         b.OpenElement(seq++, "div");
-        b.AddAttribute(seq++, "class", "gs-listen");
-
-        b.OpenElement(seq++, "div");
         b.AddAttribute(seq++, "class", "gs-listen-bar");
         b.OpenElement(seq++, "span");
         b.AddAttribute(seq++, "class", "gs-listen-count");
-        b.AddContent(seq++, listeningCount + " 个监听中 / 共 " + rows.Count + " 个群");
+        b.AddContent(seq++, listeningCount + " 个监听中");
+        b.CloseElement();
+        b.OpenElement(seq++, "span");
+        b.AddAttribute(seq++, "class", "gs-listen-meta");
+        b.AddContent(seq++, "共 " + rows.Count + " 个群　每秒刷新");
         b.CloseElement();
         if (warn.Length > 0)
         {
@@ -357,130 +362,97 @@ public sealed class QQMenuPage : CharacterMenu, IDisposable
             b.AddAttribute(seq++, "class", "gs-hint2");
             b.AddContent(seq++, emptyHint);
             b.CloseElement();
-            b.CloseElement();
             return;
         }
 
-        // 群多了要能选：下拉框里一个群一行，下面只显示选中那个群的详情
-        ListenRowView current = rows.FirstOrDefault(row => row.Id == selectedGroup) ?? rows[0];
-        selectedGroup = current.Id;
+        foreach (ListenRowView row in rows.OrderByDescending(row => row.Listening).ThenBy(row => row.Id))
+            AddListenCard(b, ref seq, row, interactive);
 
-        b.OpenElement(seq++, "div");
-        b.AddAttribute(seq++, "class", "gs-field");
-        b.OpenComponent<Select<string, string>>(seq++);
-        b.AddAttribute(seq++, "Value", current.Id);
-        b.AddAttribute(seq++, "ShowSearch", true);
-        b.AddAttribute(seq++, "Placeholder", "选择群");
-        b.AddAttribute(seq++, "Style", "width:100%;");
-        b.AddAttribute(seq++, "ValueChanged", EventCallback.Factory.Create<string>(this, v =>
-        {
-            selectedGroup = v;
-            StateHasChanged();
-        }));
-        b.AddAttribute(seq++, "ChildContent", (RenderFragment)(childBuilder =>
-        {
-            int c = 0;
-            foreach (ListenRowView row in rows)
-            {
-                childBuilder.OpenComponent<SelectOption<string, string>>(c++);
-                childBuilder.AddAttribute(c++, "Value", row.Id);
-                childBuilder.AddAttribute(c++, "Label", ListenOptionLabel(row));
-                childBuilder.CloseComponent();
-            }
-        }));
-        b.CloseComponent();
-        b.CloseElement();
-
-        AddListenRow(b, ref seq, current, interactive);
-
-        b.CloseElement();
-    }
-
-    static string ListenOptionLabel(ListenRowView row)
-    {
-        string mark = row.Listening ? "● " : "○ ";
-        return row.Name.Length > 0 ? mark + row.Name + "（" + row.Id + "）" : mark + row.Id;
-    }
-
-    void AddModuleOffline(RenderTreeBuilder b, ref int seq)
-    {
-        b.OpenElement(seq++, "div");
-        b.AddAttribute(seq++, "class", "gs-listen");
         b.OpenElement(seq++, "div");
         b.AddAttribute(seq++, "class", "gs-hint2");
-        b.AddContent(seq++, "模块实例还没起来（角色未加载或插件刚重载），群状态暂时读不到。");
-        b.CloseElement();
+        b.AddContent(seq++, "这里的开关只对本次运行有效：停掉后这个群的消息只留背景缓存，"
+            + "等下次被 @ 或唤醒词命中再开始收。");
         b.CloseElement();
     }
 
-    void AddListenRow(RenderTreeBuilder b, ref int seq, ListenRowView row, bool interactive)
+    /// <summary>一个群一张卡：状态、名字与 ID、活动/缓存摘要、三个操作，缓冲点「看缓冲」才展开。</summary>
+    void AddListenCard(RenderTreeBuilder b, ref int seq, ListenRowView row, bool interactive)
     {
-        b.OpenElement(seq++, "div");
-        b.AddAttribute(seq++, "class", "gs-listen-row");
+        bool expanded = expandedGroup == row.Id;
+        string last = row.LastActiveAt == DateTime.MinValue ? "还没用过" : row.LastActiveAt.ToString("HH:mm:ss");
 
         b.OpenElement(seq++, "div");
-        b.AddAttribute(seq++, "class", "gs-listen-name-wrap");
+        b.AddAttribute(seq++, "class", "gs-listen");
+
         b.OpenElement(seq++, "div");
+        b.AddAttribute(seq++, "class", "gs-listen-bar");
+
+        b.OpenElement(seq++, "span");
+        b.AddAttribute(seq++, "class", row.Listening ? "gs-listen-tag" : "gs-listen-tag off");
+        b.AddContent(seq++, row.Listening ? "监听中" : "待机");
+        b.CloseElement();
+
+        b.OpenElement(seq++, "span");
+        b.AddAttribute(seq++, "class", "gs-listen-name-wrap");
+        b.OpenElement(seq++, "span");
         b.AddAttribute(seq++, "class", "gs-listen-name");
         b.AddAttribute(seq++, "title", row.Name.Length > 0 ? row.Name : row.Id);
         b.AddContent(seq++, row.Name.Length > 0 ? row.Name : row.Id);
         b.CloseElement();
-        if (row.Name.Length > 0)
-        {
-            b.OpenElement(seq++, "div");
-            b.AddAttribute(seq++, "class", "gs-listen-id");
-            b.AddAttribute(seq++, "title", row.Id);
-            b.AddContent(seq++, row.Id);
-            b.CloseElement();
-        }
+        b.OpenElement(seq++, "span");
+        b.AddAttribute(seq++, "class", "gs-listen-id");
+        b.AddAttribute(seq++, "title", row.Id);
+        b.AddContent(seq++, row.Id);
         b.CloseElement();
+        b.CloseElement();
+
+        StringBuilder meta = new();
+        meta.Append("最后活动 ").Append(last)
+            .Append("　待推 ").Append(row.Buffer.Count)
+            .Append(" 条 · 背景 ").Append(row.PreBuffer.Count).Append(" 条");
+        if (row.Listening && row.Buffer.Count > 0)
+            meta.Append(" · 推送 ").Append(Math.Ceiling(row.NextFlushSeconds)).Append("s");
+        if (row.Listening && row.AutoCloseSeconds > 0)
+            meta.Append(" · 自动关 ").Append(Math.Ceiling(row.AutoCloseSeconds)).Append("min");
 
         b.OpenElement(seq++, "span");
-        b.AddAttribute(seq++, "class", row.Listening ? "gs-listen-tag" : "gs-listen-tag off");
-        b.AddContent(seq++, row.Listening ? "监听中" : "休眠");
-        b.CloseElement();
-
-        b.OpenElement(seq++, "div");
         b.AddAttribute(seq++, "class", "gs-listen-meta");
-        b.AddContent(seq++, row.Listening
-            ? "缓存 " + row.Buffer.Count + " 条" + (row.Buffer.Count > 0 ? " · 推送 " + Math.Ceiling(row.NextFlushSeconds) + "s" : "")
-              + (row.AutoCloseSeconds > 0 ? " · 自动关 " + Math.Ceiling(row.AutoCloseSeconds) + "min" : "")
-            : row.PreBuffer.Count > 0 ? "背景 " + row.PreBuffer.Count + " 条" : "无缓存");
+        b.AddContent(seq++, meta.ToString());
         b.CloseElement();
 
-        b.OpenElement(seq++, "button");
-        b.AddAttribute(seq++, "class", "gs-btn");
-        b.AddAttribute(seq++, "type", "button");
-        if (interactive == false)
-            b.AddAttribute(seq++, "disabled", true);
-        b.AddAttribute(seq++, "onclick", EventCallback.Factory.Create<MouseEventArgs>(this,
-            _ => row.Toggle(!row.Listening)));
-        b.AddContent(seq++, row.Listening ? "关闭" : "开启");
-        b.CloseElement();
-
-        b.OpenElement(seq++, "button");
-        b.AddAttribute(seq++, "class", "gs-btn");
-        b.AddAttribute(seq++, "type", "button");
-        if (row.Buffer.Count + row.PreBuffer.Count == 0)
-            b.AddAttribute(seq++, "disabled", true);
-        b.AddAttribute(seq++, "onclick", EventCallback.Factory.Create<MouseEventArgs>(this, _ => row.Flush()));
-        b.AddContent(seq++, "立即推送");
-        b.CloseElement();
+        AddListenButton(b, ref seq, row.Listening ? "停止监听" : "开始监听",
+            () => row.Toggle(!row.Listening), !interactive);
+        AddListenButton(b, ref seq, "立即推送", row.Flush, row.Buffer.Count + row.PreBuffer.Count == 0);
+        AddListenButton(b, ref seq, expanded ? "收起" : "看缓冲", () =>
+        {
+            expandedGroup = expanded ? "" : row.Id;
+            StateHasChanged();
+        }, false);
 
         b.CloseElement();
 
-        b.OpenElement(seq++, "div");
-        b.AddAttribute(seq++, "class", "gs-listen-meta2");
-        b.AddContent(seq++, "最后活动："
-            + (row.LastActiveAt == DateTime.MinValue ? "—" : row.LastActiveAt.ToString("HH:mm:ss")));
-        b.CloseElement();
+        if (expanded)
+        {
+            AddBufferBox(b, ref seq, "背景缓存（激活时一并带上）", row.PreBuffer);
+            AddBufferBox(b, ref seq, "待推送", row.Buffer);
+        }
 
-        if (row.PreBuffer.Count > 0)
-            AddBufferBox(b, ref seq, "激活前缓冲 (" + row.PreBuffer.Count + ")", row.PreBuffer, false);
-        AddBufferBox(b, ref seq, "消息缓冲 (" + row.Buffer.Count + ")", row.Buffer, true);
+        b.CloseElement();
     }
 
-    void AddBufferBox(RenderTreeBuilder b, ref int seq, string label, IReadOnlyList<string> messages, bool showEmpty)
+    void AddListenButton(RenderTreeBuilder b, ref int seq, string text, Action onClick, bool disabled)
+    {
+        b.OpenElement(seq++, "button");
+        b.AddAttribute(seq++, "class", "gs-btn");
+        b.AddAttribute(seq++, "type", "button");
+        if (disabled)
+            b.AddAttribute(seq++, "disabled", true);
+        b.AddAttribute(seq++, "onclick", EventCallback.Factory.Create<MouseEventArgs>(this, _ => onClick()));
+        b.AddContent(seq++, text);
+        b.CloseElement();
+    }
+
+    void AddBufferBox(RenderTreeBuilder b, ref int seq, string label, IReadOnlyList<string> messages)
     {
         b.OpenElement(seq++, "div");
         b.AddAttribute(seq++, "class", "gs-buffer-label");
@@ -491,13 +463,10 @@ public sealed class QQMenuPage : CharacterMenu, IDisposable
         b.AddAttribute(seq++, "class", "gs-buffer");
         if (messages.Count == 0)
         {
-            if (showEmpty)
-            {
-                b.OpenElement(seq++, "div");
-                b.AddAttribute(seq++, "class", "gs-buffer-empty");
-                b.AddContent(seq++, "暂无缓存消息");
-                b.CloseElement();
-            }
+            b.OpenElement(seq++, "div");
+            b.AddAttribute(seq++, "class", "gs-buffer-empty");
+            b.AddContent(seq++, "暂无消息");
+            b.CloseElement();
         }
         else
         {
