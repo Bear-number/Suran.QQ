@@ -13,7 +13,7 @@ r"""pcm → silk 封装器：给 Suran.QQ 的「语音·silk 编码器」用。
 装 pilk：
     D:\Alife\Runtime\Python312\python.exe -m pip install pilk
 
-现实提醒（2026-10-23 本机实测）：pilk 的 Windows 轮子只出到 **cp311**，3.12 只能拿到源码包，
+注意：pilk 的 Windows 轮子只出到 **cp311**，3.12 只能拿到源码包，
 装它要 Rust 工具链现编。装不上时有两条退路：
     ① 打开配置「语音·放行非 silk 直传」——官方富媒体概述页写明语音支持 silk/mp3/wav/ogg，
        很可能压根不用转码（限制表却只写 silk，两处矛盾，拿真接口试一次就有答案）；
