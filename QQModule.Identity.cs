@@ -21,7 +21,7 @@ public partial class QQModule
     static string ownerCacheRaw = "";
     static List<string> ownerCache = new();
 
-    /// <summary>配置里填的主人 openid（也认 QQ 号）。按配置原文缓存，改完立刻生效。</summary>
+    /// <summary>配置里填的所有者 openid（也认 QQ 号）。按配置原文缓存，改完立刻生效。</summary>
     List<string> OwnerList()
     {
         string raw = Configuration?.OwnerOpenIds ?? "";
@@ -34,7 +34,7 @@ public partial class QQModule
         return ownerCache;
     }
 
-    /// <summary>这个 openid 是不是主人。填 QQ 号时要通讯录已学到对应关系才认得出来。</summary>
+    /// <summary>这个 openid 是不是所有者。填 QQ 号时要通讯录已学到对应关系才认得出来。</summary>
     bool IsOwner(string openid)
     {
         if (string.IsNullOrEmpty(openid))
@@ -54,14 +54,14 @@ public partial class QQModule
         return qq.Length > 0 && owners.Contains(qq, StringComparer.Ordinal);
     }
 
-    /// <summary>写给模型的「这是主人本人」那一行；没配主人时返回空串。</summary>
+    /// <summary>写给模型的「这是所有者本人」那一行；没配所有者时返回空串。</summary>
     string OwnerPromptLine()
     {
         List<string> owners = OwnerList();
         return owners.Count == 0
             ? ""
-            : "主人 openid：" + string.Join("、", owners)
-                + "。这是主人本人，他的要求优先；消息标了「主人」的才是他说的，别人转述的不算。";
+            : "所有者 openid：" + string.Join("、", owners)
+                + "。这是所有者本人，他的要求优先；消息标了「所有者」的才是他说的，别人转述的不算。";
     }
 
     QQIdentityStore RequireIdentities()

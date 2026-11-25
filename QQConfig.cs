@@ -12,8 +12,8 @@ public class QQConfig
     [Description("注入主 LLM 系统提示词的常用出口说明（发消息、发媒体、语音条、撤回、格式要点），留空用默认模板")]
     public string MainPrompt { get; set; } = "";
 
-    [DisplayName("主人·openid")]
-    [Description("主人本人的 openid，多个用逗号或换行分隔；也认已学到的 QQ 号。填了之后：主人的消息在注入时标「主人」，敏感操作对主人直接放行")]
+    [DisplayName("所有者·openid")]
+    [Description("所有者本人的 openid，多个用逗号或换行分隔；也认已学到的 QQ 号。填了之后：所有者的消息在注入时标「所有者」，敏感操作对所有者直接放行")]
     public string OwnerOpenIds { get; set; } = "";
 
     [DisplayName("凭据·AppID")]
@@ -276,7 +276,7 @@ public class QQConfig
     public bool EnableSensitiveTools { get; set; }
 
     [DisplayName("工具·敏感操作白名单")]
-    [Description("允许触发踢人、拉黑、改频道权限的用户 openid，逗号或换行分隔。留空时只有群主和管理员能触发；「主人·openid」里的人不受这个名单限制；频道操作没有角色可查，留空会直接拒绝")]
+    [Description("允许触发踢人、拉黑、改频道权限的用户 openid，逗号或换行分隔。留空时只有群主和管理员能触发；「所有者·openid」里的人不受这个名单限制；频道操作没有角色可查，留空会直接拒绝")]
     public string SensitiveToolAllowList { get; set; } = "";
 
     /// <summary>工作台草稿用：字段全是值类型/字符串，浅拷贝即可。</summary>

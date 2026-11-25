@@ -101,13 +101,13 @@ internal sealed class QQConfigFields
         start = i;
     }
 
-    /// <summary>主人身份：填了之后消息注入会标「主人」，敏感操作对主人直接放行。</summary>
+    /// <summary>所有者身份：填了之后消息注入会标「所有者」，敏感操作对所有者直接放行。</summary>
     public void Owner(RenderTreeBuilder b, ref int start, QQConfig cfg)
     {
         int i = start;
-        Panel(b, ref i, "主人", () =>
+        Panel(b, ref i, "所有者", () =>
         {
-            TextArea(b, ref i, "主人 openid", cfg.OwnerOpenIds,
+            TextArea(b, ref i, "所有者 openid", cfg.OwnerOpenIds,
                 v => cfg.OwnerOpenIds = v, "32 位十六进制；多个用逗号或换行分隔");
             Hint(b, ref i, "从注入消息的 [openid(昵称)]: 里抄，或用「列群成员」拿到。私聊的 user_openid 与群里的 member_openid 是同一个值。");
             Hint(b, ref i, "只认 openid 最稳；填 QQ 号要等通讯录从群成员里学到对应关系才生效。");
@@ -447,7 +447,7 @@ internal sealed class QQConfigFields
 
             Input(b, ref i, "敏感操作白名单", cfg.SensitiveToolAllowList, v => cfg.SensitiveToolAllowList = v,
                 "允许触发上述操作的用户 openid，逗号分隔。留空则只认群主和管理员；频道操作留空会直接拒绝");
-            Hint(b, ref i, "「主人·openid」里填的人不受这个名单限制，直接放行。");
+            Hint(b, ref i, "「所有者·openid」里填的人不受这个名单限制，直接放行。");
         });
         start = i;
     }

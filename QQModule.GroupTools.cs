@@ -76,7 +76,7 @@ public partial class QQModule
         List<string> allowList = SplitIds(Configuration.SensitiveToolAllowList);
         if (IsOwner(senderId))
         {
-            DetailLog("敏感操作放行（主人）：" + senderId + " → " + target);
+            DetailLog("敏感操作放行（所有者）：" + senderId + " → " + target);
             return;
         }
         if (allowList.Count > 0)
@@ -93,7 +93,7 @@ public partial class QQModule
         if (speakerIsGroup == false || target.Length == 0)
         {
             throw new Exception("白名单为空，私聊里无法核对发起人是否群管理员。"
-                + "要执行请先在「工具·敏感操作白名单」或「主人·openid」里填上允许操作的 openid");
+                + "要执行请先在「工具·敏感操作白名单」或「所有者·openid」里填上允许操作的 openid");
         }
         string role = await TryResolveGroupRoleAsync(target, senderId);
         if (role == "owner" || role == "admin")
