@@ -623,8 +623,8 @@ public partial class QQModule
         public readonly Dictionary<string, int> Used = new(StringComparer.OrdinalIgnoreCase);
     }
 
-    static readonly Dictionary<string, ButtonLedgerEntry> buttonLedger = new(StringComparer.Ordinal);
-    static bool buttonLedgerDirty;
+    readonly Dictionary<string, ButtonLedgerEntry> buttonLedger = new(StringComparer.Ordinal);
+    bool buttonLedgerDirty;
 
     string ButtonLedgerPath => Path.Combine(AlifePath.StorageFolderPath, Configuration.DataFolder.Trim(), "button-ledger.json");
 

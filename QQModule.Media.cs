@@ -710,10 +710,10 @@ public partial class QQModule
 
     // ── 动图降级链 ─────────────────────────────────────────────
 
-    static readonly Dictionary<string, DateTime> rejectedImageOriginals = new(StringComparer.OrdinalIgnoreCase);
+    readonly Dictionary<string, DateTime> rejectedImageOriginals = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>被拒记录只用来 10 分钟内不重试，攒到一定量就把过期的清掉。</summary>
-    static void PruneRejectedOriginals()
+    void PruneRejectedOriginals()
     {
         if (rejectedImageOriginals.Count <= 200)
         {

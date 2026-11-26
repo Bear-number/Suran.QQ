@@ -17,7 +17,8 @@ public class QQConfig
     public string OwnerOpenIds { get; set; } = "";
 
     [DisplayName("凭据·AppID")]
-    [Description("QQ 开放平台机器人的 AppID（q.qq.com 后台「开发管理」里那串数字 ID）。只进本地配置，插件不会把它打进日志或回显")]
+    [Description("QQ 开放平台机器人的 AppID（q.qq.com 后台「开发管理」里那串数字 ID）。只进本地配置，插件不会把它打进日志或回显。"
+        + "同一 AppID 不要同时给多个角色连，平台会互踢；多角色请各建一个机器人")]
     public string AppId { get; set; } = "";
 
     [DisplayName("凭据·AppSecret")]

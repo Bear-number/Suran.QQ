@@ -18,8 +18,8 @@ public partial class QQModule
 {
     const int learnMembersMaxPages = 10;
 
-    static string ownerCacheRaw = "";
-    static List<string> ownerCache = new();
+    string ownerCacheRaw = "";
+    List<string> ownerCache = new();
 
     /// <summary>配置里填的所有者 openid（也认 QQ 号）。按配置原文缓存，改完立刻生效。</summary>
     List<string> OwnerList()

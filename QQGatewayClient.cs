@@ -80,7 +80,7 @@ public class QQGatewayClient(
             }
             catch (OperationCanceledException)
             {
-                State = "已随宿主销毁";
+                State = "已停止（角色销毁或配置重建）";
                 return;
             }
             catch (Exception loopError)

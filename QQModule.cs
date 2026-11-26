@@ -1,3 +1,4 @@
+﻿#nullable enable annotations
 using System;
 using System.Collections.Generic;
 using System.ComponentModel;
@@ -44,33 +45,44 @@ public partial class QQModule(
     const int passiveReplyGroupTimes = 5;
     const int passiveReplyPrivateTimes = 4;
 
-    // 传输层跨热重载共用一份：网关连接、token、以及「该会话最近一条可被动回复的消息」
-    static QQAccessToken accessToken;
-    static QQRestClient rest;
-    static QQGatewayClient gateway;
-    static string botOpenId = "";
-    static string botResolveError = "";
+    // 传输层按角色实例各存一份：连接、token、客户端、会话台账都跟着这个模块走。
+    // 以前是 static 共享，第一个角色的销毁令牌管着全进程的连接，她一重启，别的角色就永远起不来；
+    // 同一进程里再开第二个官 bot，也只会看到第一个的状态、拿不到自己的事件。
+    QQAccessToken accessToken;
+    QQRestClient rest;
+    QQGatewayClient gateway;
+    string botOpenId = "";
+    string botResolveError = "";
     QQIdentityStore identities;
     DateTime lastIdentitySaved = DateTime.MinValue;
-    static string gatewayStateText = "还没起连接";
-    static readonly Dictionary<string, string> lastInboundMessageId = new();
-    static readonly Dictionary<string, string> lastBotMessageId = new();
-    static readonly Dictionary<string, (DateTime ExpireAtUtc, int Times)> replyBudget = new();
-    static readonly Dictionary<string, DateTime> seenEvents = new();
-    static readonly object seenGate = new();
+    string gatewayStateText = "还没起连接";
+    readonly Dictionary<string, string> lastInboundMessageId = new();
+    readonly Dictionary<string, string> lastBotMessageId = new();
+    readonly Dictionary<string, (DateTime ExpireAtUtc, int Times)> replyBudget = new();
+    readonly Dictionary<string, DateTime> seenEvents = new();
+    readonly object seenGate = new();
     const int seenEventPruneEvery = 100;
-    static int seenEventPruneTick;
-    static readonly Dictionary<string, int> typingFrames = new();
-    static readonly Dictionary<string, int> seqByMessageId = new();
-    static readonly Dictionary<string, string> pendingInteractions = new();
-    static readonly object transportGate = new();
+    int seenEventPruneTick;
+    readonly Dictionary<string, int> typingFrames = new();
+    readonly Dictionary<string, int> seqByMessageId = new();
+    readonly Dictionary<string, string> pendingInteractions = new();
+    readonly object transportGate = new();
+
+    // 传输层自己的取消源：配置改了要重建时只掐这一条，不碰宿主给的角色销毁令牌
+    CancellationTokenSource transportCts;
+    string transportKey = "";
+    string registeredAppId = "";
+
+    // 只做提示：同一 AppID 开多条连接时，平台可能互踢；不阻断，免得两个角色都起不来
+    static readonly object activeBotsGate = new();
+    static readonly Dictionary<string, int> activeBots = new(StringComparer.OrdinalIgnoreCase);
 
     // 敏感群管理操作的发起人核对用：记最近一条入站消息是谁发的、在哪个会话，超时就当没有发起人
-    static readonly object speakerGate = new();
-    static string lastSpeakerId = "";
-    static string lastSpeakerGroupId = "";
-    static bool lastSpeakerIsGroup;
-    static DateTime lastSpeakerAtUtc = DateTime.MinValue;
+    readonly object speakerGate = new();
+    string lastSpeakerId = "";
+    string lastSpeakerGroupId = "";
+    bool lastSpeakerIsGroup;
+    DateTime lastSpeakerAtUtc = DateTime.MinValue;
 
     /// <summary>官方网关的实时状态文本（网关自己会按「断线重连间隔」重试，这里只给设置页看）。</summary>
     public string OfficialGatewayState => gateway?.State ?? gatewayStateText;
@@ -180,6 +192,7 @@ public partial class QQModule(
         identities.Load();
         identities.LearnQqFromPeers();
         LoadButtonLedger();
+        transportKey = TransportFingerprint();
         StartTransport();
         return Task.CompletedTask;
     }
@@ -197,6 +210,7 @@ public partial class QQModule(
             }
         }
 
+        EnsureTransportFresh();
         OfficialListenTick();
         return Task.CompletedTask;
     }
@@ -204,7 +218,7 @@ public partial class QQModule(
     protected override Task OnDestroy()
     {
         identities?.SaveIfNeeded();
-        logger.LogInformation("[QQOfficial] 插件卸载，网关随销毁令牌停止");
+        StopTransport("角色卸载");
         return Task.CompletedTask;
     }
 
@@ -214,14 +228,116 @@ public partial class QQModule(
 
     void StartTransport()
     {
+        if (transportCts != null || gateway != null)
+        {
+            StopTransport("重新启动");
+        }
         if (TryConfigure(out string configureError) == false)
         {
             gatewayStateText = "没起来：" + configureError;
             logger.LogInformation("[QQOfficial] 不启动网关：{Error}", configureError);
             return;
         }
-        gateway?.Start(DestroyCancellationToken);
-        _ = Task.Run(() => ResolveSelfAsync(), DestroyCancellationToken);
+        transportCts = CancellationTokenSource.CreateLinkedTokenSource(DestroyCancellationToken);
+        gateway.Start(transportCts.Token);
+        RegisterActiveBot();
+        _ = Task.Run(() => ResolveSelfAsync(transportCts.Token), transportCts.Token);
+    }
+
+    /// <summary>配置改了（AppID/密钥/代理/超时/intents）就重建这一条连接，旧连接只掐自己的取消源。</summary>
+    void EnsureTransportFresh()
+    {
+        if (Configuration == null)
+        {
+            return;
+        }
+        string key = TransportFingerprint();
+        if (key == transportKey)
+        {
+            return;
+        }
+        logger.LogInformation("[QQOfficial] 网络或机器人配置变化，重建网关连接");
+        StopTransport("配置变化");
+        transportKey = key;
+        StartTransport();
+    }
+
+    void StopTransport(string reason)
+    {
+        CancellationTokenSource cts = transportCts;
+        transportCts = null;
+        try
+        {
+            cts?.Cancel();
+        }
+        catch (ObjectDisposedException)
+        {
+            // 已经停过
+        }
+        cts?.Dispose();
+        UnregisterActiveBot();
+        accessToken = null;
+        rest = null;
+        gateway = null;
+        botOpenId = "";
+        botResolveError = "";
+        gatewayStateText = "还没起连接";
+        logger.LogInformation("[QQOfficial] 传输层已停止：{Reason}", reason);
+    }
+
+    string TransportFingerprint()
+    {
+        return string.Join("|",
+            Configuration.AppId.Trim(),
+            Configuration.AppSecret.Trim(),
+            Configuration.ApiBaseUrl.Trim(),
+            Configuration.ProxyUrl.Trim(),
+            Configuration.RequestTimeoutSeconds.ToString(CultureInfo.InvariantCulture),
+            Configuration.ReconnectSeconds.ToString(CultureInfo.InvariantCulture),
+            QQIntents.FromConfig(Configuration).ToString(CultureInfo.InvariantCulture));
+    }
+
+    void RegisterActiveBot()
+    {
+        // 先把自己上一次的登记退掉，免得 StartTransport 被重复调用时把计数堆高
+        UnregisterActiveBot();
+        string appId = Configuration.AppId.Trim();
+        registeredAppId = appId;
+        lock (activeBotsGate)
+        {
+            int count = activeBots.TryGetValue(appId, out int used) ? used + 1 : 1;
+            activeBots[appId] = count;
+            if (count > 1)
+            {
+                logger.LogWarning("[QQOfficial] 同一 AppID {AppId} 在本进程开了 {Count} 条网关连接，"
+                    + "平台可能互踢；多角色请各用各的机器人凭据", appId, count);
+            }
+        }
+    }
+
+    void UnregisterActiveBot()
+    {
+        if (registeredAppId.Length == 0)
+        {
+            return;
+        }
+        string appId = registeredAppId;
+        registeredAppId = "";
+        lock (activeBotsGate)
+        {
+            if (!activeBots.TryGetValue(appId, out int count))
+            {
+                return;
+            }
+            if (count <= 1)
+            {
+                activeBots.Remove(appId);
+            }
+            else
+            {
+                activeBots[appId] = count - 1;
+            }
+        }
     }
 
     bool TryConfigure(out string error)
@@ -247,21 +363,32 @@ public partial class QQModule(
     }
 
     /// <summary>取机器人自己的 openid：官方会把机器人发出去的消息再推回来，没有它挡不住回声</summary>
-    async Task ResolveSelfAsync()
+    async Task ResolveSelfAsync(CancellationToken cancelToken)
     {
         for (int attempt = 0; attempt < 3 && botOpenId.Length == 0; attempt++)
         {
             try
             {
-                JsonElement self = await RequireRest().GetAsync("/users/@me", DestroyCancellationToken);
+                JsonElement self = await RequireRest().GetAsync("/users/@me", cancelToken);
                 botOpenId = QQJson.Text(self, "id");
                 DetailLog("机器人 openid 已取到");
+                return;
+            }
+            catch (OperationCanceledException)
+            {
                 return;
             }
             catch (Exception selfError)
             {
                 botResolveError = selfError.Message;
-                await Task.Delay(TimeSpan.FromSeconds(5), DestroyCancellationToken);
+                try
+                {
+                    await Task.Delay(TimeSpan.FromSeconds(5), cancelToken);
+                }
+                catch (OperationCanceledException)
+                {
+                    return;
+                }
             }
         }
     }
@@ -386,7 +513,7 @@ public partial class QQModule(
     }
 
     /// <summary>记下最近一条入站消息的发起人与会话，供敏感工具核对身份用。</summary>
-    static void RememberSpeaker(string senderId, bool isGroup, string targetId)
+    void RememberSpeaker(string senderId, bool isGroup, string targetId)
     {
         lock (speakerGate)
         {
@@ -594,9 +721,9 @@ public partial class QQModule(
     static readonly Regex LegacyAtMarkup = new(@"<@!?([0-9A-Za-z\-_]+)>", RegexOptions.Compiled);
     static readonly Regex NewAtMarkup = new("<qqbot-at-user\\s+id\\s*=\\s*\"([^\"]+)\"\\s*/?>", RegexOptions.Compiled);
 
-    static readonly Dictionary<string, DateTime> recentAtCopies = new(StringComparer.Ordinal);
+    readonly Dictionary<string, DateTime> recentAtCopies = new(StringComparer.Ordinal);
 
-    static void PruneAtCopies()
+    void PruneAtCopies()
     {
         DateTime limit = DateTime.Now.AddSeconds(-60);
         foreach (string stale in recentAtCopies.Where(pair => pair.Value < limit).Select(pair => pair.Key).ToList())
@@ -1016,7 +1143,7 @@ public partial class QQModule(
     }
 
     /// <summary>同一个 msg_id 的每一句都要换新的 msg_seq，从 1 开始单调递增</summary>
-    static int NextMessageSeq(string messageId)
+    int NextMessageSeq(string messageId)
     {
         int next = (seqByMessageId.TryGetValue(messageId, out int used) ? used : 0) + 1;
         seqByMessageId[messageId] = next;
@@ -1466,7 +1593,7 @@ public partial class QQModule(
             + QQSendPolish.DescribeFrames(typingFrames[key], Configuration.TypingMaxFrames));
     }
 
-    static readonly Dictionary<string, DateTime> typingNoticeAt = new(StringComparer.OrdinalIgnoreCase);
+    readonly Dictionary<string, DateTime> typingNoticeAt = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>收到私聊后按「延时 + 防抖」自动补一帧「正在输入」，和 KiraAI 的手感一致。</summary>
     void ScheduleTypingNotice(string userOpenid, string messageId)
