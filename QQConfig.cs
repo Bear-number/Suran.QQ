@@ -4,6 +4,8 @@ namespace Suran.QQ;
 
 public class QQConfig
 {
+    /// <summary>界面主题：pink = 粉色（默认），dark = 黑夜。</summary>
+    public string UiTheme { get; set; } = "pink";
     [DisplayName("运行·功能文档常驻")]
     [Description("关（默认）：完整文档不常驻，模型输出 <QQModule/> 才注入，省 token；开：完整文档常驻系统提示词")]
     public bool DocumentAlwaysResident { get; set; } = false;

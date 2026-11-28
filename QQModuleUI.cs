@@ -3,6 +3,7 @@ using System.Linq;
 using Alife.Framework;
 using Microsoft.AspNetCore.Components;
 using Microsoft.AspNetCore.Components.Rendering;
+using Microsoft.AspNetCore.Components.Web;
 
 namespace Suran.QQ;
 
@@ -34,14 +35,13 @@ public partial class QQModuleUI : ModuleUIBase<QQModule, QQConfig>
 
         int i = 0;
         b.OpenElement(i++, "div");
-        b.AddAttribute(i++, "class", "gs-root");
+        b.AddAttribute(i++, "class", "br-page br-compact");
+        b.AddAttribute(i++, "data-theme", QQConfigFields.ThemeOf(Configuration?.UiTheme));
+        b.AddAttribute(i++, "style",
+            "height:auto;min-height:0;max-width:100%;overflow:visible;padding:22px;"
+            + "display:grid;gap:16px;align-content:start;");
 
         QQConfigFields.Styles(b, ref i);
-
-        b.OpenElement(i++, "div");
-        b.AddAttribute(i++, "class", "gs-title");
-        b.AddContent(i++, "QQ 接入");
-        b.CloseElement();
 
         BuildHero(b, ref i);
 
@@ -73,34 +73,63 @@ public partial class QQModuleUI : ModuleUIBase<QQModule, QQConfig>
         return ChatActivity?.Container?.Instances.OfType<QQModule>().FirstOrDefault();
     }
 
-    static void BuildHero(RenderTreeBuilder b, ref int i)
+    void BuildHero(RenderTreeBuilder b, ref int i)
     {
+        bool dark = QQConfigFields.ThemeOf(Configuration?.UiTheme) == "dark";
+
         b.OpenElement(i++, "div");
-        b.AddAttribute(i++, "class", "gs-hero");
+        b.AddAttribute(i++, "class", "br-panel");
+
         b.OpenElement(i++, "div");
-        b.AddAttribute(i++, "class", "gs-hero-title");
+        b.AddAttribute(i++, "class", "br-panel-header");
+        b.OpenElement(i++, "div");
+
+        b.OpenElement(i++, "p");
+        b.AddAttribute(i++, "class", "br-kicker");
+        b.AddContent(i++, "QQ OFFICIAL · OPENAPI");
+        b.CloseElement();
+
+        b.OpenElement(i++, "h2");
+        b.AddAttribute(i++, "class", "br-panel-title");
         b.AddContent(i++, "官方 OpenAPI");
         b.CloseElement();
-        b.OpenElement(i++, "div");
-        b.AddAttribute(i++, "class", "gs-hero-sub");
+
+        b.CloseElement();
+
+        b.OpenElement(i++, "button");
+        b.AddAttribute(i++, "type", "button");
+        b.AddAttribute(i++, "class", "br-button br-small br-ghost");
+        b.AddAttribute(i++, "onclick", EventCallback.Factory.Create<MouseEventArgs>(this, () =>
+        {
+            if (Configuration != null)
+                Configuration.UiTheme = dark ? "pink" : "dark";
+            StateHasChanged();
+        }));
+        b.AddContent(i++, dark ? "◐ 粉色主题" : "◑ 黑夜主题");
+        b.CloseElement();
+
+        b.CloseElement();
+
+        b.OpenElement(i++, "p");
+        b.AddAttribute(i++, "class", "br-note");
         b.AddContent(i++, "自己取 access_token 并续期、连 WebSocket 网关收事件，把 QQ 侧消息按会话形状注入 Alife，"
             + "回复由模型调用发送工具发出：文本、markdown、富媒体、按钮回调、群管理与频道管理都在这里。");
         b.CloseElement();
+
         b.OpenElement(i++, "div");
-        b.AddAttribute(i++, "class", "gs-hero-chain");
+        b.AddAttribute(i++, "class", "br-pills");
+        b.AddAttribute(i++, "style", "margin-top:12px;");
         HeroNode(b, ref i, "填凭据");
-        HeroArrow(b, ref i);
         HeroNode(b, ref i, "连网关");
-        HeroArrow(b, ref i);
         HeroNode(b, ref i, "收发消息");
         b.CloseElement();
+
         b.CloseElement();
     }
 
     static void HeroNode(RenderTreeBuilder b, ref int i, string text)
     {
         b.OpenElement(i++, "span");
-        b.AddAttribute(i++, "class", "gs-node");
         b.AddContent(i++, text);
         b.CloseElement();
     }
@@ -116,7 +145,7 @@ public partial class QQModuleUI : ModuleUIBase<QQModule, QQConfig>
     static void AddHint(RenderTreeBuilder b, ref int seq, string text)
     {
         b.OpenElement(seq++, "div");
-        b.AddAttribute(seq++, "class", "gs-hint2");
+        b.AddAttribute(seq++, "class", "br-note");
         b.AddContent(seq++, text);
         b.CloseElement();
     }

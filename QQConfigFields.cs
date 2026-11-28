@@ -1,6 +1,7 @@
-﻿#nullable enable annotations
+#nullable enable annotations
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using AntDesign;
 using Microsoft.AspNetCore.Components;
 using Microsoft.AspNetCore.Components.Rendering;
@@ -29,6 +30,10 @@ internal sealed class QQConfigFields
     }
 
     void Refresh() => changed?.Invoke();
+
+    /// <summary>主题值归一化：只有 dark 是黑夜，其余都当粉色。</summary>
+    internal static string ThemeOf(string? value) =>
+        string.Equals(value, "dark", StringComparison.OrdinalIgnoreCase) ? "dark" : "pink";
 
     /// <summary>「查看提示词」是否展开。渲染器实例跟着页面走，翻页签不会丢。</summary>
     bool showPrompt;
@@ -497,30 +502,34 @@ internal sealed class QQConfigFields
     public static void Panel(RenderTreeBuilder b, ref int seq, string title, Action render)
     {
         b.OpenElement(seq++, "div");
-        b.AddAttribute(seq++, "class", "gs-panel");
+        b.AddAttribute(seq++, "class", "br-panel");
         b.OpenElement(seq++, "div");
-        b.AddAttribute(seq++, "class", "gs-panel-head");
+        b.AddAttribute(seq++, "class", "br-panel-header");
         b.OpenElement(seq++, "span");
-        b.AddAttribute(seq++, "class", "gs-panel-dot");
-        b.CloseElement();
+        b.AddAttribute(seq++, "class", "br-panel-title");
         b.AddContent(seq++, title);
         b.CloseElement();
+        b.CloseElement();
+        b.OpenElement(seq++, "div");
+        b.AddAttribute(seq++, "class", "br-stack");
         render();
+        b.CloseElement();
         b.CloseElement();
     }
 
     void Label(RenderTreeBuilder b, ref int seq, string text)
     {
-        b.OpenElement(seq++, "div");
-        b.AddAttribute(seq++, "class", "gs-label");
+        b.OpenElement(seq++, "p");
+        b.AddAttribute(seq++, "class", "br-kicker");
+        b.AddAttribute(seq++, "style", "margin:14px 0 0;");
         b.AddContent(seq++, text);
         b.CloseElement();
     }
 
     static void Hint(RenderTreeBuilder b, ref int seq, string text)
     {
-        b.OpenElement(seq++, "div");
-        b.AddAttribute(seq++, "class", "gs-hint2");
+        b.OpenElement(seq++, "p");
+        b.AddAttribute(seq++, "class", "br-note");
         b.AddContent(seq++, text);
         b.CloseElement();
     }
@@ -528,65 +537,81 @@ internal sealed class QQConfigFields
     void Input(RenderTreeBuilder b, ref int seq, string label, string value, Action<string> setter,
         string placeholder = "请输入", bool password = false)
     {
-        Label(b, ref seq, label);
-        b.OpenElement(seq++, "div");
-        b.AddAttribute(seq++, "class", "gs-field");
-        b.OpenComponent<Input<string>>(seq++);
-        b.AddAttribute(seq++, "Value", value);
-        b.AddAttribute(seq++, "Placeholder", placeholder);
-        if (password)
-            b.AddAttribute(seq++, "Type", InputType.Password);
-        b.AddAttribute(seq++, "ValueChanged", EventCallback.Factory.Create<string>(owner, setter));
-        b.CloseComponent();
+        b.OpenElement(seq++, "label");
+        b.AddAttribute(seq++, "class", "br-field");
+        b.OpenElement(seq++, "span");
+        b.AddContent(seq++, label);
+        b.CloseElement();
+        b.OpenElement(seq++, "input");
+        b.AddAttribute(seq++, "class", "br-input");
+        b.AddAttribute(seq++, "type", password ? "password" : "text");
+        b.AddAttribute(seq++, "value", value ?? "");
+        b.AddAttribute(seq++, "placeholder", placeholder);
+        b.AddAttribute(seq++, "onchange", EventCallback.Factory.Create<ChangeEventArgs>(owner,
+            e => setter(e.Value?.ToString() ?? "")));
+        b.CloseElement();
         b.CloseElement();
     }
 
     void Number(RenderTreeBuilder b, ref int seq, string label, int value, Action<int> setter, int min, int max)
     {
-        Label(b, ref seq, label);
-        b.OpenElement(seq++, "div");
-        b.AddAttribute(seq++, "class", "gs-field");
-        b.OpenComponent<InputNumber<int>>(seq++);
-        b.AddAttribute(seq++, "Value", value);
-        b.AddAttribute(seq++, "Min", min);
-        b.AddAttribute(seq++, "Max", max);
-        b.AddAttribute(seq++, "Style", "width:100%;");
-        b.AddAttribute(seq++, "ValueChanged", EventCallback.Factory.Create<int>(owner, setter));
-        b.CloseComponent();
+        b.OpenElement(seq++, "label");
+        b.AddAttribute(seq++, "class", "br-field");
+        b.OpenElement(seq++, "span");
+        b.AddContent(seq++, label);
+        b.CloseElement();
+        b.OpenElement(seq++, "input");
+        b.AddAttribute(seq++, "class", "br-input");
+        b.AddAttribute(seq++, "type", "number");
+        b.AddAttribute(seq++, "min", min.ToString(CultureInfo.InvariantCulture));
+        b.AddAttribute(seq++, "max", max.ToString(CultureInfo.InvariantCulture));
+        b.AddAttribute(seq++, "value", value.ToString(CultureInfo.InvariantCulture));
+        b.AddAttribute(seq++, "onchange", EventCallback.Factory.Create<ChangeEventArgs>(owner, e =>
+        {
+            if (int.TryParse(e.Value?.ToString(), NumberStyles.Integer, CultureInfo.InvariantCulture, out int parsed))
+                setter(parsed);
+        }));
+        b.CloseElement();
         b.CloseElement();
     }
 
     static void SubGroup(RenderTreeBuilder b, ref int seq, string title)
     {
-        b.OpenElement(seq++, "div");
-        b.AddAttribute(seq++, "class", "gs-subhead");
+        b.OpenElement(seq++, "p");
+        b.AddAttribute(seq++, "class", "br-kicker");
+        b.AddAttribute(seq++, "style", "margin:18px 0 0;");
         b.AddContent(seq++, title);
         b.CloseElement();
     }
 
     void Switch(RenderTreeBuilder b, ref int seq, string label, bool value, Action<bool> setter)
     {
-        Label(b, ref seq, label);
-        b.OpenComponent<Switch>(seq++);
-        b.AddAttribute(seq++, "Checked", value);
-        b.AddAttribute(seq++, "CheckedChildren", "开");
-        b.AddAttribute(seq++, "UnCheckedChildren", "关");
-        b.AddAttribute(seq++, "CheckedChanged", EventCallback.Factory.Create<bool>(owner, setter));
-        b.CloseComponent();
+        b.OpenElement(seq++, "label");
+        b.AddAttribute(seq++, "class", "br-toggle");
+        b.OpenElement(seq++, "input");
+        b.AddAttribute(seq++, "type", "checkbox");
+        b.AddAttribute(seq++, "checked", value);
+        b.AddAttribute(seq++, "onchange", EventCallback.Factory.Create<ChangeEventArgs>(owner,
+            e => setter(e.Value is bool flag && flag)));
+        b.CloseElement();
+        b.OpenElement(seq++, "span");
+        b.AddContent(seq++, label);
+        b.CloseElement();
+        b.CloseElement();
     }
 
     void TextArea(RenderTreeBuilder b, ref int seq, string label, string value, Action<string> setter,
         string placeholder = "")
     {
-        Label(b, ref seq, label);
-        b.OpenElement(seq++, "div");
-        b.AddAttribute(seq++, "class", "gs-field");
+        b.OpenElement(seq++, "label");
+        b.AddAttribute(seq++, "class", "br-field");
+        b.OpenElement(seq++, "span");
+        b.AddContent(seq++, label);
+        b.CloseElement();
         b.OpenElement(seq++, "textarea");
-        b.AddAttribute(seq++, "value", value);
-        b.AddAttribute(seq++, "placeholder", placeholder);
+        b.AddAttribute(seq++, "class", "br-textarea");
         b.AddAttribute(seq++, "rows", "3");
-        b.AddAttribute(seq++, "style", "width:100%;box-sizing:border-box;border-radius:10px;border:1px solid #f7d6e6;"
-            + "background:#fffafd;padding:8px 11px;font-size:12px;color:#3d2a33;font-family:inherit;line-height:1.6;resize:vertical;");
+        b.AddAttribute(seq++, "placeholder", placeholder);
         b.AddAttribute(seq++, "oninput", EventCallback.Factory.Create<ChangeEventArgs>(owner,
             e => setter(e.Value?.ToString() ?? "")));
         b.AddContent(seq++, value);
@@ -597,32 +622,29 @@ internal sealed class QQConfigFields
     void LabeledSelect(RenderTreeBuilder b, ref int seq, string value, Action<string> setter,
         List<(string Value, string Label, bool Enabled)> options)
     {
-        b.OpenElement(seq++, "div");
-        b.AddAttribute(seq++, "class", "gs-field");
-        b.OpenComponent<Select<string, string>>(seq++);
-        b.AddAttribute(seq++, "Value", value);
-        b.AddAttribute(seq++, "Style", "width:100%;");
-        b.AddAttribute(seq++, "ValueChanged", EventCallback.Factory.Create<string>(owner, setter));
-        b.AddAttribute(seq++, "ChildContent", (RenderFragment)(childBuilder =>
+        b.OpenElement(seq++, "select");
+        b.AddAttribute(seq++, "class", "br-select");
+        b.AddAttribute(seq++, "onchange", EventCallback.Factory.Create<ChangeEventArgs>(owner,
+            e => setter(e.Value?.ToString() ?? "")));
+        foreach ((string optValue, string optLabel, bool enabled) in options)
         {
-            int c = 0;
-            foreach ((string optValue, string optLabel, bool enabled) in options)
-            {
-                childBuilder.OpenComponent<SelectOption<string, string>>(c++);
-                childBuilder.AddAttribute(c++, "Value", optValue);
-                childBuilder.AddAttribute(c++, "Label", optLabel);
-                childBuilder.AddAttribute(c++, "Disabled", !enabled);
-                childBuilder.CloseComponent();
-            }
-        }));
-        b.CloseComponent();
+            b.OpenElement(seq++, "option");
+            b.AddAttribute(seq++, "value", optValue);
+            if (!enabled)
+                b.AddAttribute(seq++, "disabled", true);
+            if (string.Equals(optValue, value, StringComparison.Ordinal))
+                b.AddAttribute(seq++, "selected", true);
+            b.AddContent(seq++, optLabel);
+            b.CloseElement();
+        }
         b.CloseElement();
     }
 
     void ActionButton(RenderTreeBuilder b, ref int seq, string text, Action onClick, bool disabled = false)
     {
         b.OpenElement(seq++, "button");
-        b.AddAttribute(seq++, "class", "gs-btn");
+        b.AddAttribute(seq++, "class",
+            "br-button br-small" + (text.Contains("删除") ? " br-danger" : " br-ghost"));
         b.AddAttribute(seq++, "type", "button");
         if (disabled)
             b.AddAttribute(seq++, "disabled", true);
@@ -634,6 +656,9 @@ internal sealed class QQConfigFields
     /// <summary>gs- 皮肤样式：设置页和工作台各输出一次，保证两页观感一致。</summary>
     public static void Styles(RenderTreeBuilder b, ref int seq)
     {
+        b.OpenElement(seq++, "style");
+        b.AddContent(seq++, BreezeUiAssets.Css);
+        b.CloseElement();
         b.OpenElement(seq++, "style");
         b.AddContent(seq++, """
             .gs-root{
@@ -695,32 +720,212 @@ internal sealed class QQConfigFields
             .gs-buffer-item{padding:2px 0;border-bottom:1px dashed #fbe6f0;}
             .gs-buffer-item:last-child{border-bottom:none;}
             .gs-buffer-empty{color:#b7a3ae;text-align:center;padding:12px 0;}
-            @media (prefers-color-scheme:dark){
-                .gs-root{background:linear-gradient(180deg,#2a1622 0%,#16181d 140px);
+            html[data-theme="dark"] .gs-root{background:linear-gradient(180deg,#2a1622 0%,#16181d 140px);
                     border-color:#3a2532;color:#e7e9ec;box-shadow:0 4px 24px rgba(0,0,0,.35);}
-                .gs-title{color:#e7e9ec;}
-                .gs-panel{background:#1e2127;border-color:#33232c;box-shadow:none;}
-                .gs-panel-head,.gs-label{color:#c9cdd4;}
-                .gs-hint2{color:#9aa1ab;}
-                .gs-listen{background:#1e2127;border-color:#33232c;}
-                .gs-listen-name{color:#e7e9ec;}
-                .gs-listen-id{color:#9aa1ab;}
-                .gs-listen-row{border-top-color:#33232c;}
-                .gs-listen-meta{color:#9aa1ab;}
-                .gs-listen-tag{background:#2a1b24;border-color:#5e3348;color:#ffadd2;}
-                .gs-listen-tag.off{background:#22262d;border-color:#33373e;color:#8b929c;}
-                .gs-btn{background:#2a1b24;border-color:#5e3348;color:#ffadd2;}
-                .gs-listen-meta2{color:#9aa1ab;}
-                .gs-buffer-label{color:#9aa1ab;}
-                .gs-buffer{background:#181b20;border-color:#33232c;color:#c9cdd4;}
-                .gs-buffer-item{border-bottom-color:#2a2229;}
-                .gs-buffer-empty{color:#6b727c;}
-                .gs-root .ant-input,.gs-root .ant-input-number{
-                    background:#22262d !important;border-color:#33373e !important;
+            html[data-theme="dark"] .gs-title{color:#e7e9ec;}
+            html[data-theme="dark"] .gs-panel{background:#1e2127;border-color:#33232c;box-shadow:none;}
+            html[data-theme="dark"] .gs-panel-head, html[data-theme="dark"] .gs-label{color:#c9cdd4;}
+            html[data-theme="dark"] .gs-hint2{color:#9aa1ab;}
+            html[data-theme="dark"] .gs-listen{background:#1e2127;border-color:#33232c;}
+            html[data-theme="dark"] .gs-listen-name{color:#e7e9ec;}
+            html[data-theme="dark"] .gs-listen-id{color:#9aa1ab;}
+            html[data-theme="dark"] .gs-listen-row{border-top-color:#33232c;}
+            html[data-theme="dark"] .gs-listen-meta{color:#9aa1ab;}
+            html[data-theme="dark"] .gs-listen-tag{background:#2a1b24;border-color:#5e3348;color:#ffadd2;}
+            html[data-theme="dark"] .gs-listen-tag.off{background:#22262d;border-color:#33373e;color:#8b929c;}
+            html[data-theme="dark"] .gs-btn{background:#2a1b24;border-color:#5e3348;color:#ffadd2;}
+            html[data-theme="dark"] .gs-listen-meta2{color:#9aa1ab;}
+            html[data-theme="dark"] .gs-buffer-label{color:#9aa1ab;}
+            html[data-theme="dark"] .gs-buffer{background:#181b20;border-color:#33232c;color:#c9cdd4;}
+            html[data-theme="dark"] .gs-buffer-item{border-bottom-color:#2a2229;}
+            html[data-theme="dark"] .gs-buffer-empty{color:#6b727c;}
+            html[data-theme="dark"] .gs-root .ant-input, html[data-theme="dark"] .gs-root .ant-input-number{background:#22262d !important;border-color:#33373e !important;
                     color:#e7e9ec !important;box-shadow:none !important;}
-                .gs-root .ant-input:hover,.gs-root .ant-input-number:hover{border-color:#5e3348 !important;}
+            html[data-theme="dark"] .gs-root .ant-input:hover, html[data-theme="dark"] .gs-root .ant-input-number:hover{border-color:#5e3348 !important;}
+
+            /* ===== Breeze 皮肤：br- 令牌（粉色默认 / 黑夜跟随系统），嵌在 .br-page 里会自动继承 ===== */
+            .gs-root{
+                --bk-accent:var(--br-accent,#e0448d);
+                --bk-accent-2:var(--br-secondary,#8c5cb8);
+                --bk-accent-rgb:var(--br-accent-rgb,224,68,141);
+                --bk-accent-ink:var(--br-accent-ink,#fff6fb);
+                --bk-ink:var(--br-ink,#3b2533);
+                --bk-muted:var(--br-muted,#7c6272);
+                --bk-dim:var(--br-dim,#a08494);
+                --bk-line:var(--br-line,#f2cfe0);
+                --bk-line-soft:var(--br-line-soft,#fbe2ee);
+                --bk-surface:var(--br-surface,#fffafd);
+                --bk-surface-2:var(--br-surface-2,#ffedf6);
+                --bk-field:var(--br-field,#fff6fb);
+                --bk-paper:var(--br-paper,#fff9fc);
+                --bk-paper-edge:var(--br-paper-edge,#f1d2e2);
+                --bk-bg:var(--br-bg-2,#fff6fa);
+                --bk-shadow:var(--br-shadow,0 24px 60px rgba(196,64,132,.14));
+                --bk-warn:#b26a3d;--bk-warn-bg:#fff7e6;--bk-warn-line:#f0d9b5;
+                background:var(--bk-bg);border-color:var(--bk-line-soft);
+                box-shadow:var(--bk-shadow);color:var(--bk-ink);
             }
-            """);
+            
+            
+            .gs-title{color:var(--bk-ink);}
+            .gs-hero{
+                background:linear-gradient(120deg,var(--bk-accent) 0%,var(--bk-accent-2) 100%);
+                color:var(--bk-accent-ink);box-shadow:var(--bk-shadow);
+                border-radius:14px;padding:18px 20px;
+            }
+            .gs-hero::before{
+                left:auto;right:-36px;top:-52px;width:170px;height:170px;border-radius:50%;
+                background:rgba(255,255,255,.12);animation:none;transform:none;
+            }
+            .gs-hero::after{
+                content:"";position:absolute;right:44px;bottom:-70px;width:130px;height:130px;
+                border-radius:50%;background:rgba(255,255,255,.08);
+            }
+            .gs-hero-title{font-size:17px;letter-spacing:.3px;}
+            .gs-hero-sub{margin-top:5px;line-height:1.65;}
+            .gs-hero-chain{margin-top:12px;}
+            .gs-node{padding:2px 10px;border-color:rgba(255,255,255,.30);}
+            .gs-arrow{opacity:.7;}
+            .gs-panel{
+                background:var(--bk-paper);border-color:var(--bk-paper-edge);
+                box-shadow:0 2px 10px rgba(var(--bk-accent-rgb),.05);
+            }
+            .gs-panel::before{background:linear-gradient(180deg,var(--bk-accent),var(--bk-accent-2));}
+            .gs-panel-head{color:var(--bk-ink);}
+            .gs-panel-dot{background:var(--bk-accent);box-shadow:0 0 0 3px rgba(var(--bk-accent-rgb),.14);}
+            .gs-subhead{border-left-color:var(--bk-accent-2);color:var(--bk-accent);}
+            .gs-label{color:var(--bk-ink);}
+            .gs-hint2{color:var(--bk-muted);}
+            .gs-root .ant-input,.gs-root .ant-input-number{
+                border-color:var(--bk-line) !important;background:var(--bk-field) !important;
+                color:var(--bk-ink) !important;box-shadow:none !important;
+            }
+            .gs-root .ant-input:hover,.gs-root .ant-input-number:hover{
+                border-color:var(--bk-accent-2) !important;box-shadow:none !important;
+            }
+            .gs-root .ant-input:focus,.gs-root .ant-input-number-focused{
+                border-color:var(--bk-accent) !important;
+                box-shadow:0 0 0 3px rgba(var(--bk-accent-rgb),.16) !important;
+            }
+            .gs-root .ant-switch-checked{background:var(--bk-accent) !important;}
+            .gs-listen{background:var(--bk-surface);border-color:var(--bk-line);}
+            .gs-listen-count{color:var(--bk-accent);}
+            .gs-listen-warn{
+                color:var(--bk-warn);background:var(--bk-warn-bg);border-color:var(--bk-warn-line);
+            }
+            .gs-listen-row{border-top-color:var(--bk-line-soft);}
+            .gs-listen-name{color:var(--bk-ink);}
+            .gs-listen-id{color:var(--bk-dim);}
+            .gs-listen-tag{
+                border-color:var(--bk-accent);color:var(--bk-accent);background:var(--bk-surface-2);
+            }
+            .gs-listen-tag.off{
+                border-color:var(--bk-line);color:var(--bk-muted);background:var(--bk-surface);
+            }
+            .gs-listen-meta,.gs-listen-meta2{color:var(--bk-muted);}
+            .gs-btn{
+                border:1px solid var(--bk-accent);background:var(--bk-surface);color:var(--bk-accent);
+            }
+            .gs-btn:hover{
+                background:linear-gradient(120deg,var(--bk-accent),var(--bk-accent-2));
+                color:var(--bk-accent-ink);border-color:transparent;
+                box-shadow:0 2px 10px rgba(var(--bk-accent-rgb),.20);
+            }
+            .gs-buffer-label{color:var(--bk-muted);}
+            .gs-buffer{
+                background:var(--bk-field);border-color:var(--bk-line);color:var(--bk-muted);
+            }
+            .gs-buffer-item{border-bottom-color:var(--bk-line-soft);}
+            .gs-buffer-empty{color:var(--bk-dim);}
+
+            /* Breeze 页里的自定义卡片沿用同一组令牌；同时显式给一套粉色 br 令牌 */
+            .br-page{
+                --br-bg:#fff1f7;--br-bg-2:#fff6fa;
+                --br-surface:#fffafd;--br-surface-2:#ffedf6;--br-surface-3:#ffe1ee;--br-field:#fff6fb;
+                --br-ink:#3b2533;--br-muted:#7c6272;--br-dim:#a08494;
+                --br-line:#f2cfe0;--br-line-soft:#fbe2ee;
+                --br-accent:#e0448d;--br-accent-rgb:224,68,141;--br-accent-ink:#fff6fb;
+                --br-secondary:#8c5cb8;--br-secondary-rgb:140,92,184;
+                --br-warn:#b26a3d;--br-danger:#cf3a63;
+                --br-glass:rgba(255,247,252,.94);--br-shadow:0 24px 60px rgba(196,64,132,.14);
+                --br-sun:#ffadd1;--br-sun-ink:#4a2438;
+                --br-lilac:#f7e3f3;--br-mint:#e6f0ea;
+                --br-paper:#fff9fc;--br-paper-edge:#f1d2e2;--br-petal:#f0b6d3;
+                --br-hero-bg:#ffeaf3;--br-hero-ink:#3a2130;--br-hero-wash:255,234,243;
+                --br-scheme:light;
+                --bk-accent:var(--br-accent,#e0448d);
+                --bk-accent-2:var(--br-secondary,#8c5cb8);
+                --bk-accent-rgb:var(--br-accent-rgb,224,68,141);
+                --bk-accent-ink:var(--br-accent-ink,#fff6fb);
+                --bk-ink:var(--br-ink,#3b2533);
+                --bk-muted:var(--br-muted,#7c6272);
+                --bk-dim:var(--br-dim,#a08494);
+                --bk-line:var(--br-line,#f2cfe0);
+                --bk-line-soft:var(--br-line-soft,#fbe2ee);
+                --bk-surface:var(--br-surface,#fffafd);
+                --bk-surface-2:var(--br-surface-2,#ffedf6);
+                --bk-field:var(--br-field,#fff6fb);
+                --bk-paper:var(--br-paper,#fff9fc);
+                --bk-paper-edge:var(--br-paper-edge,#f1d2e2);
+                --bk-bg:var(--br-bg-2,#fff6fa);
+                --bk-shadow:var(--br-shadow,0 24px 60px rgba(196,64,132,.14));
+                --bk-warn:#b26a3d;--bk-warn-bg:#fff7e6;--bk-warn-line:#f0d9b5;
+            }
+            
+            
+            .br-stack{display:grid;gap:12px;}
+            .br-page .br-kicker{text-transform:none;}
+            .br-page .br-panel-title{font-size:15px;}
+            .br-page .gs-listen{margin:0;padding:12px 14px;border:1px dashed var(--bk-line);border-radius:12px;background:var(--bk-field);display:grid;gap:10px;}
+            .br-page .gs-listen-bar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:0;}
+            .br-page .gs-listen-count{font-size:12px;font-weight:700;color:var(--bk-accent);}
+            .br-page .gs-listen-warn{font-size:11px;color:var(--bk-warn);background:var(--bk-warn-bg);border:1px solid var(--bk-warn-line);border-radius:999px;padding:1px 8px;}
+            .br-page .gs-listen-name-wrap{display:flex;flex-direction:column;max-width:200px;min-width:0;}
+            .br-page .gs-listen-name{font-size:12px;font-weight:600;color:var(--bk-ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+            .br-page .gs-listen-id{font-size:10px;color:var(--bk-dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+            .br-page .gs-listen-tag{font-size:11px;border-radius:999px;padding:1px 8px;border:1px solid var(--bk-line);color:var(--bk-accent);background:var(--bk-surface);}
+            .br-page .gs-listen-tag.off{border-color:var(--bk-line);color:var(--bk-dim);background:var(--bk-field);}
+            .br-page .gs-listen-meta{font-size:11px;color:var(--bk-muted);flex:1;min-width:130px;}
+            .br-page .gs-buffer-label{font-size:11px;color:var(--bk-muted);margin:0;}
+            .br-page .gs-buffer{max-height:140px;overflow-y:auto;background:var(--bk-field);border:1px dashed var(--bk-line);border-radius:10px;padding:6px 8px;font-family:var(--br-mono,Consolas,monospace);font-size:11px;line-height:1.55;color:var(--bk-ink);word-break:break-word;margin:0;}
+            .br-page .gs-buffer-item{padding:2px 0;border-bottom:1px dashed var(--bk-line-soft);}
+            .br-page .gs-buffer-item:last-child{border-bottom:none;}
+            .br-page .gs-buffer-empty{color:var(--bk-dim);text-align:center;padding:12px 0;}
+
+            /* 本插件的粉/黑开关；框架切黑夜时同样强制黑夜 */
+            .br-page[data-theme="dark"],
+            html[data-theme="dark"] .br-page{
+                --br-bg:#151016;--br-bg-2:#1b1420;
+                --br-surface:#211a26;--br-surface-2:#2a2131;--br-surface-3:#33283b;--br-field:#1c1621;
+                --br-ink:#f4e9f1;--br-muted:#b9a7b7;--br-dim:#8e7b8d;
+                --br-line:#3c2f43;--br-line-soft:#2f2536;
+                --br-accent:#ff7ab8;--br-accent-rgb:255,122,184;--br-accent-ink:#2b1220;
+                --br-secondary:#c6a2e6;--br-secondary-rgb:198,162,230;
+                --br-warn:#f0b46a;--br-danger:#ff6f92;
+                --br-glass:rgba(31,24,36,.92);--br-shadow:0 24px 60px rgba(0,0,0,.5);
+                --br-sun:#ffb3d3;--br-sun-ink:#2b1220;
+                --br-lilac:#2c2433;--br-mint:#22302a;
+                --br-paper:#251d2a;--br-paper-edge:#3c2f43;--br-petal:#4b2f44;
+                --br-hero-bg:#241a2a;--br-hero-ink:#f7ecf3;--br-hero-wash:30,22,36;
+                --br-scheme:dark;
+                --bk-accent:#ff7ab8;--bk-accent-2:#c6a2e6;--bk-accent-rgb:255,122,184;--bk-accent-ink:#2b1220;
+                --bk-ink:#f4e9f1;--bk-muted:#b9a7b7;--bk-dim:#8e7b8d;
+                --bk-line:#3c2f43;--bk-line-soft:#2f2536;
+                --bk-surface:#211a26;--bk-surface-2:#2a2131;--bk-field:#1c1621;
+                --bk-paper:#251d2a;--bk-paper-edge:#3c2f43;
+                --bk-bg:#151016;--bk-shadow:0 24px 60px rgba(0,0,0,.5);
+                --bk-warn:#f0b46a;--bk-warn-bg:#3a2a12;--bk-warn-line:#6b4a18;
+            }
+            
+            /* 腾讯 QQ 企鹅形象，叠在 hero 右侧 */
+            .br-page .br-hero-mascot{
+                position:absolute;right:clamp(18px,5vw,64px);top:clamp(14px,4vw,36px);
+                width:clamp(96px,15vw,190px);height:auto;z-index:2;opacity:.92;pointer-events:none;
+                filter:brightness(0) invert(1) drop-shadow(0 14px 34px rgba(0,0,0,.22));
+            }
+            .br-page[data-theme="dark"] .br-hero-mascot{opacity:.8;}
+.br-page{--br-hero-image:url("https://upload.wikimedia.org/wikipedia/commons/thumb/a/ae/Smartphone_with_ChatGPT_app_%2852917381673%29.jpg/1920px-Smartphone_with_ChatGPT_app_%2852917381673%29.jpg");}
+""");
         b.CloseElement();
     }
 }
